@@ -37,7 +37,7 @@ locals {
 
   default_tags = merge(
     {
-      Source       = "jumpstart-inference"
+      Source       = "inference"
       Template     = local.template_name
       Version      = local.template_version
       DeploymentId = random_id.postfix.hex

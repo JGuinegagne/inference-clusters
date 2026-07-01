@@ -44,12 +44,12 @@ export HOST_GID := `id -g`
 # so a top-level discovery here would make `just sync`/`lint`/`unit-test` fail on a fresh
 # clone (pytest-jupyter-deploy isn't installed yet) — a bootstrap deadlock. E2E recipes
 # run post-sync, so resolving lazily keeps them working while freeing the core recipes.
-e2e-container-name := "jumpstart-inference-e2e"
+e2e-container-name := "inference-e2e"
 e2e-image-tag := "latest"
-export E2E_IMAGE := "jumpstart-inference-e2e:latest"
+export E2E_IMAGE := "inference-e2e:latest"
 
 # Template under test (matches libs/<template>/tests/e2e)
-default-template := "jumpstart-inference-tf-aws-eks-karpenter"
+default-template := "inference-tf-aws-eks-karpenter"
 
 # Start E2E container in background (always builds to ensure correct UID/GID)
 # Usage: just e2e-up [no-cache=true]
@@ -264,7 +264,7 @@ test-e2e project_dir="sandbox-e2e" test_filter="" options="" template=default-te
 # Example: just test-e2e-eks-karpenter sandbox-e2e test_configuration            # config only, no AWS
 # Example: just test-e2e-eks-karpenter sandbox-e2e "" full-deploy=true,destroy=true
 test-e2e-eks-karpenter project_dir="sandbox-e2e" test_filter="" options="":
-    @just test-e2e {{project_dir}} "{{test_filter}}" "{{options}}" jumpstart-inference-tf-aws-eks-karpenter
+    @just test-e2e {{project_dir}} "{{test_filter}}" "{{options}}" inference-tf-aws-eks-karpenter
 
 # Full workflow: start container (builds if needed) then run tests
 e2e-all project_dir="sandbox-e2e" test_filter="" options="" no_cache="false" template=default-template:

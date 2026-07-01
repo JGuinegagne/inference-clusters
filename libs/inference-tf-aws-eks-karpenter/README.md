@@ -10,7 +10,7 @@ workloads are layered onto.
 - node autoscaling: Karpenter (self-managed nodes)
 
 > **Status:** seed scaffold. The Terraform engine under
-> `jumpstart_inference_tf_aws_eks_karpenter/template/engine/` is a skeleton — the cluster,
+> `inference_tf_aws_eks_karpenter/template/engine/` is a skeleton — the cluster,
 > Karpenter install, and node pools are added in follow-up commits.
 
 ## Usage
@@ -20,7 +20,7 @@ This template is meant to be used with the
 
 ```bash
 # install the CLI with AWS + Kubernetes support, plus this template
-uv add "jupyter-deploy[aws,k8s]" jumpstart-inference-tf-aws-eks-karpenter
+uv add "jupyter-deploy[aws,k8s]" inference-tf-aws-eks-karpenter
 
 # scaffold a project from this template
 jd init my-inference-cluster

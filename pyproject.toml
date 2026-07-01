@@ -1,20 +1,20 @@
 [project]
-name = "jumpstart-inference-clusters-monorepo"
+name = "inference-clusters-monorepo"
 version = "0.1.0"
 description = "Monorepo of jupyter-deploy templates for JumpStart inference EKS clusters"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "jupyter-deploy[aws,k8s]",
-    "jumpstart-inference-tf-aws-eks-karpenter",
+    "inference-tf-aws-eks-karpenter",
 ]
 
 [tool.uv.sources]
-jumpstart-inference-tf-aws-eks-karpenter = { workspace = true }
+inference-tf-aws-eks-karpenter = { workspace = true }
 
 [tool.uv.workspace]
 members = [
-    "libs/jumpstart-inference-tf-aws-eks-karpenter",
+    "libs/inference-tf-aws-eks-karpenter",
 ]
 
 [tool.ruff]
@@ -44,24 +44,24 @@ disallow_untyped_defs = true
 check_untyped_defs = true
 explicit_package_bases = true
 mypy_path = [
-    "libs/jumpstart-inference-tf-aws-eks-karpenter",
+    "libs/inference-tf-aws-eks-karpenter",
 ]
 files = [
-    "libs/jumpstart-inference-tf-aws-eks-karpenter",
+    "libs/inference-tf-aws-eks-karpenter",
 ]
 # Template test directories excluded: identical module paths (tests/unit/) across
 # template packages cause "Duplicate module" errors. Each template package runs its
 # own mypy via [tool.mypy] in its pyproject.toml.
 exclude = [
-    "libs/jumpstart-inference-tf-aws-eks-karpenter/tests/",
+    "libs/inference-tf-aws-eks-karpenter/tests/",
 ]
 
 [tool.pytest.ini_options]
 pythonpath = [
-    "libs/jumpstart-inference-tf-aws-eks-karpenter",
+    "libs/inference-tf-aws-eks-karpenter",
 ]
 testpaths = [
-    "libs/jumpstart-inference-tf-aws-eks-karpenter/tests/unit",
+    "libs/inference-tf-aws-eks-karpenter/tests/unit",
 ]
 markers = [
     "e2e: End-to-end tests against a (real or scaffolded) deployment (deselect with '-m \"not e2e\"')",
