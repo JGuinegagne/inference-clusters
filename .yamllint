@@ -1,0 +1,80 @@
+---
+extends: default
+
+rules:
+  # Indentation - allow sequences at block level (not indented under parent)
+  indentation:
+    spaces: 2
+    indent-sequences: consistent
+
+  # Line length - use warning level for flexibility
+  line-length:
+    max: 120
+    level: warning
+
+  # Document markers - most files don't use ---
+  document-start: disable
+
+  # Boolean values - enforce true/false (GitHub Actions style)
+  # Allow 'on' for GitHub Actions workflow triggers
+  truthy:
+    allowed-values: ['true', 'false', 'on']
+
+  # String quoting - prefer unquoted when possible
+  quoted-strings:
+    quote-type: any
+    required: false
+
+  # Comments
+  comments:
+    min-spaces-from-content: 1
+  comments-indentation: disable
+
+  # Trailing spaces
+  trailing-spaces: enable
+
+  # New lines
+  new-line-at-end-of-file: enable
+  new-lines:
+    type: unix
+
+  # Empty lines
+  empty-lines:
+    max: 2
+
+  # Key duplicates
+  key-duplicates: enable
+
+  # Brackets and braces
+  brackets:
+    min-spaces-inside: 0
+    max-spaces-inside: 0
+  braces:
+    min-spaces-inside: 0
+    max-spaces-inside: 0
+
+  # Colons
+  colons:
+    max-spaces-before: 0
+    max-spaces-after: 1
+
+  # Commas
+  commas:
+    max-spaces-before: 0
+    min-spaces-after: 1
+    max-spaces-after: 1
+
+# Ignore patterns matching .gitignore
+ignore: |
+  sandbox*/
+  .venv/
+  test-results/
+  .auth/
+  __pycache__/
+  .pytest_cache/
+  .mypy_cache/
+  .ruff_cache/
+  dist/
+  build/
+  *.egg-info/
+  **/charts/*/templates/
