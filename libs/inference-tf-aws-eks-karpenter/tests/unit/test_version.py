@@ -15,16 +15,16 @@ def test_version_consistency() -> None:
     with open(project_path / "pyproject.toml", "rb") as f:
         pyproject_version = tomllib.load(f)["project"]["version"]
 
-    init_path = project_path / "jumpstart_inference_tf_aws_eks_karpenter" / "__init__.py"
+    init_path = project_path / "inference_tf_aws_eks_karpenter" / "__init__.py"
     init_match = re.search(r'__version__\s*=\s*["\']([^"\']+)["\']', init_path.read_text())
     assert init_match is not None, "Could not find __version__ in __init__.py"
     init_version = init_match.group(1)
 
-    manifest_path = project_path / "jumpstart_inference_tf_aws_eks_karpenter" / "template" / "manifest.yaml"
+    manifest_path = project_path / "inference_tf_aws_eks_karpenter" / "template" / "manifest.yaml"
     with open(manifest_path) as f:
         manifest_version = yaml.safe_load(f)["template"]["version"]
 
-    main_tf_path = project_path / "jumpstart_inference_tf_aws_eks_karpenter" / "template" / "engine" / "main.tf"
+    main_tf_path = project_path / "inference_tf_aws_eks_karpenter" / "template" / "engine" / "main.tf"
     main_tf_match = re.search(r'template_version\s*=\s*["\']([^"\']+)["\']', main_tf_path.read_text())
     assert main_tf_match is not None, "Could not find template_version in main.tf"
     main_tf_version = main_tf_match.group(1)

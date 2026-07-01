@@ -1,5 +1,5 @@
 [project]
-name = "jumpstart-inference-tf-aws-eks-karpenter"
+name = "inference-tf-aws-eks-karpenter"
 version = "0.1.0rc1"
 description = "Terraform template to provision a base AWS EKS cluster with Karpenter for JumpStart inference workloads."
 readme = "README.md"
@@ -19,11 +19,11 @@ dependencies = [
 file = "LICENSE"
 
 [project.entry-points."jupyter_deploy.terraform_templates"]
-aws_eks_karpenter = "jumpstart_inference_tf_aws_eks_karpenter.template:TEMPLATE_PATH"
+aws_eks_karpenter = "inference_tf_aws_eks_karpenter.template:TEMPLATE_PATH"
 
 [project.urls]
-Homepage = "https://github.com/jupyter-infra/jumpstart-inference-clusters"
-github = "https://github.com/jupyter-infra/jumpstart-inference-clusters/tree/main/libs/jumpstart-inference-tf-aws-eks-karpenter"
+Homepage = "https://github.com/jupyter-infra/inference-clusters"
+github = "https://github.com/jupyter-infra/inference-clusters/tree/main/libs/inference-tf-aws-eks-karpenter"
 
 [build-system]
 requires = [
@@ -33,7 +33,7 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = [
-    "jumpstart_inference_tf_aws_eks_karpenter",
+    "inference_tf_aws_eks_karpenter",
 ]
 
 [tool.mypy]
@@ -45,7 +45,7 @@ mypy_path = [
     ".",
 ]
 packages = [
-    "jumpstart_inference_tf_aws_eks_karpenter",
+    "inference_tf_aws_eks_karpenter",
 ]
 
 [tool.ruff]

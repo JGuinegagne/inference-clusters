@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from jumpstart_inference_tf_aws_eks_karpenter.template import TEMPLATE_PATH
+from inference_tf_aws_eks_karpenter.template import TEMPLATE_PATH
 
 MANDATORY_TEMPLATE_STRPATHS: list[str] = [
     "manifest.yaml",

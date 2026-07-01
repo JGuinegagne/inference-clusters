@@ -5,5 +5,5 @@
 # a later -f override. Passed as an extra `-f` on every compose invocation.
 services:
   e2e:
-    container_name: jumpstart-inference-e2e
-    image: jumpstart-inference-e2e:latest
+    container_name: inference-e2e
+    image: inference-e2e:latest

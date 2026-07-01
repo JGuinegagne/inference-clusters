@@ -35,7 +35,7 @@ libs/<template-package>/
 ## Template packages
 
 ### EKS Karpenter base template
-Code: `./libs/jumpstart-inference-tf-aws-eks-karpenter`
+Code: `./libs/inference-tf-aws-eks-karpenter`
 
 - infrastructure-as-code engine: `terraform`
 - cloud provider: `aws`
@@ -82,7 +82,7 @@ Dockerfile in this repo.
 
 The base compose file (vended by the plugin) hardcodes the container/image name to
 `jupyter-deploy-e2e`. We merge a committed override (`docker-compose.e2e-name.yml`) on
-every compose call so this repo's container/image are named `jumpstart-inference-e2e` —
+every compose call so this repo's container/image are named `inference-e2e` —
 they never collide with a jupyter-deploy E2E run on the same host.
 
 - `just e2e-up` — build + start the E2E container.

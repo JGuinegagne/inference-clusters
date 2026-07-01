@@ -8,7 +8,7 @@ import hcl2
 import yaml
 from jupyter_deploy.handlers import base_project_handler
 
-from jumpstart_inference_tf_aws_eks_karpenter.template import TEMPLATE_PATH
+from inference_tf_aws_eks_karpenter.template import TEMPLATE_PATH
 
 
 class TestManifest(unittest.TestCase):

@@ -9,8 +9,8 @@ resolution-markers = [
 
 [manifest]
 members = [
-    "jumpstart-inference-clusters-monorepo",
-    "jumpstart-inference-tf-aws-eks-karpenter",
+    "inference-clusters-monorepo",
+    "inference-tf-aws-eks-karpenter",
 ]
 
 [[package]]
@@ -561,11 +561,11 @@ wheels = [
 ]
 
 [[package]]
-name = "jumpstart-inference-clusters-monorepo"
+name = "inference-clusters-monorepo"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
-    { name = "jumpstart-inference-tf-aws-eks-karpenter" },
+    { name = "inference-tf-aws-eks-karpenter" },
     { name = "jupyter-deploy", extra = ["aws", "k8s"] },
 ]
 
@@ -583,7 +583,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "jumpstart-inference-tf-aws-eks-karpenter", editable = "libs/jumpstart-inference-tf-aws-eks-karpenter" },
+    { name = "inference-tf-aws-eks-karpenter", editable = "libs/inference-tf-aws-eks-karpenter" },
     { name = "jupyter-deploy", extras = ["aws", "k8s"] },
 ]
 
@@ -600,9 +600,9 @@ dev = [
 ]
 
 [[package]]
-name = "jumpstart-inference-tf-aws-eks-karpenter"
+name = "inference-tf-aws-eks-karpenter"
 version = "0.1.0rc1"
-source = { editable = "libs/jumpstart-inference-tf-aws-eks-karpenter" }
+source = { editable = "libs/inference-tf-aws-eks-karpenter" }
 dependencies = [
     { name = "boto3" },
     { name = "boto3-stubs" },

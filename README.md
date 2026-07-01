@@ -16,7 +16,7 @@ that registers itself with the CLI via a `jupyter_deploy.terraform_templates` en
 
 ## Packages
 
-- [jumpstart-inference-tf-aws-eks-karpenter](./libs/jumpstart-inference-tf-aws-eks-karpenter/README.md):
+- [inference-tf-aws-eks-karpenter](./libs/inference-tf-aws-eks-karpenter/README.md):
   A Terraform template that provisions a base AWS EKS cluster with [Karpenter](https://karpenter.sh)
   for node autoscaling over **self-managed nodes**, intended as the foundation for inference workloads.
 
