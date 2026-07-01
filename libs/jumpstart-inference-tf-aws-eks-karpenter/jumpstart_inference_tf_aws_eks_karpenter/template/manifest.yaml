@@ -1,0 +1,20 @@
+schema_version: 1
+template:
+  name: tf-aws-eks-karpenter
+  engine: terraform
+  version: 0.1.0rc1
+requirements:
+- name: terraform
+- name: awscli
+- name: kubectl
+values:
+- name: deployment_id
+  source: output
+  source-key: deployment_id
+- name: aws_region
+  source: output
+  source-key: region
+# NOTE: cluster_name, cluster_endpoint, kubeconfig_path values are added once the
+# corresponding outputs land (see engine/outputs.tf).
+project-store:
+  store-type: s3-only

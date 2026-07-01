@@ -1,0 +1,9 @@
+# Committed compose override that renames the E2E container and image so they do
+# not collide with jupyter-deploy's own E2E container/image when both repos are
+# exercised on the same host. The base compose file (vended by pytest-jupyter-deploy)
+# hardcodes container_name: jupyter-deploy-e2e, which can only be changed by merging
+# a later -f override. Passed as an extra `-f` on every compose invocation.
+services:
+  e2e:
+    container_name: jumpstart-inference-e2e
+    image: jumpstart-inference-e2e:latest

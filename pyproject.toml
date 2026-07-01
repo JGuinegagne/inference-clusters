@@ -1,0 +1,80 @@
+[project]
+name = "jumpstart-inference-clusters-monorepo"
+version = "0.1.0"
+description = "Monorepo of jupyter-deploy templates for JumpStart inference EKS clusters"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "jupyter-deploy[aws,k8s]",
+    "jumpstart-inference-tf-aws-eks-karpenter",
+]
+
+[tool.uv.sources]
+jumpstart-inference-tf-aws-eks-karpenter = { workspace = true }
+
+[tool.uv.workspace]
+members = [
+    "libs/jumpstart-inference-tf-aws-eks-karpenter",
+]
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+preview = true
+select = [
+    "E",   # pycodestyle
+    "F",   # pyflakes
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "SIM", # flake8-simplify
+    "I",   # isort
+    "PLC0415",  # import-outside-toplevel - disallow lazy imports
+]
+ignore = [
+    "UP042",  # Replace str/Enum with StrEnum (Python 3.11+)
+    "UP046",  # Use PEP 695 type parameters (Python 3.12+)
+    "UP047",  # Use PEP 695 type parameters for functions (Python 3.12+)
+]
+
+[tool.mypy]
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+check_untyped_defs = true
+explicit_package_bases = true
+mypy_path = [
+    "libs/jumpstart-inference-tf-aws-eks-karpenter",
+]
+files = [
+    "libs/jumpstart-inference-tf-aws-eks-karpenter",
+]
+# Template test directories excluded: identical module paths (tests/unit/) across
+# template packages cause "Duplicate module" errors. Each template package runs its
+# own mypy via [tool.mypy] in its pyproject.toml.
+exclude = [
+    "libs/jumpstart-inference-tf-aws-eks-karpenter/tests/",
+]
+
+[tool.pytest.ini_options]
+pythonpath = [
+    "libs/jumpstart-inference-tf-aws-eks-karpenter",
+]
+testpaths = [
+    "libs/jumpstart-inference-tf-aws-eks-karpenter/tests/unit",
+]
+markers = [
+    "e2e: End-to-end tests against a (real or scaffolded) deployment (deselect with '-m \"not e2e\"')",
+]
+
+[tool.uv]
+dev-dependencies = [
+    "mypy>=1.15.0",
+    "pytest>=8.3.5",
+    "pytest-jupyter-deploy[ui]",
+    "python-hcl2>=7.2.1",
+    "pyyaml>=6.0.2",
+    "ruff>=0.11.8",
+    "types-pyyaml>=6.0.12.20250516",
+    "yamllint>=1.35.0",
+]
