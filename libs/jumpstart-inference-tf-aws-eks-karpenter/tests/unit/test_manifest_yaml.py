@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 from typing import Any
 
+import hcl2
 import yaml
 from jupyter_deploy.handlers import base_project_handler
 
@@ -51,8 +52,18 @@ class TestManifest(unittest.TestCase):
     def test_variables_parses_as_a_dict(self) -> None:
         self.assertIsInstance(self.VARIABLES_CONFIG, dict)
 
-    def test_overrides_keys_are_declared_variables(self) -> None:
-        """Every preset default in defaults-all.tfvars should be a known variable name."""
+    def test_variables_config_has_overrides_key(self) -> None:
         assert self.VARIABLES_CONFIG is not None
         # variables.yaml overrides are commented out in the seed; this guards the schema shape.
         self.assertIn("overrides", self.VARIABLES_CONFIG)
+
+    def test_preset_defaults_are_declared_variables(self) -> None:
+        """Every key in defaults-all.tfvars must have a matching variable block in variables.tf."""
+        engine = TEMPLATE_PATH / "engine"
+        with open(engine / "presets" / "defaults-all.tfvars") as f:
+            preset_keys = set(hcl2.load(f).keys())
+        with open(engine / "variables.tf") as f:
+            # hcl2 v7 keeps the block label quoted (e.g. '"region"'); strip the quotes.
+            declared = {name.strip('"') for block in hcl2.load(f).get("variable", []) for name in block}
+        undeclared = preset_keys - declared
+        self.assertEqual(undeclared, set(), f"undeclared preset keys: {undeclared}")

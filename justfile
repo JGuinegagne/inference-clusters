@@ -37,10 +37,13 @@ export HOST_GID := `id -g`
 # merge a committed override (docker-compose.e2e-name.yml) so this repo's container
 # and image get distinct names and never collide with a jupyter-deploy E2E run on the
 # same host. E2E_IMAGE steers the image ${E2E_IMAGE:-...} interpolation in the base file.
-e2e-image-dir := `uv run python -c "from pytest_jupyter_deploy.image import IMAGE_PATH; print(IMAGE_PATH)"`
-e2e-base-compose-file := e2e-image-dir + "/docker-compose.yml"
-e2e-name-compose-file := justfile_directory() + "/docker-compose.e2e-name.yml"
-e2e-compose-files := "-f " + e2e-base-compose-file + " -f " + e2e-name-compose-file
+#
+# The base compose dir is discovered from pytest-jupyter-deploy at runtime, INSIDE each
+# E2E recipe body (E2E_IMAGE_DIR / E2E_COMPOSE_FILES) rather than a top-level `:=` backtick.
+# `just` eagerly evaluates every top-level backtick assignment before running ANY recipe,
+# so a top-level discovery here would make `just sync`/`lint`/`unit-test` fail on a fresh
+# clone (pytest-jupyter-deploy isn't installed yet) — a bootstrap deadlock. E2E recipes
+# run post-sync, so resolving lazily keeps them working while freeing the core recipes.
 e2e-container-name := "jumpstart-inference-e2e"
 e2e-image-tag := "latest"
 export E2E_IMAGE := "jumpstart-inference-e2e:latest"
@@ -54,6 +57,9 @@ e2e-up no_cache="false":
     #!/usr/bin/env bash
     set -euo pipefail
 
+    E2E_IMAGE_DIR="$(uv run python -c 'from pytest_jupyter_deploy.image import IMAGE_PATH; print(IMAGE_PATH)')"
+    E2E_COMPOSE_FILES="-f $E2E_IMAGE_DIR/docker-compose.yml -f {{justfile_directory()}}/docker-compose.e2e-name.yml"
+
     echo "Building and starting E2E container (HOST_UID={{HOST_UID}}, HOST_GID={{HOST_GID}})..."
     mkdir -p {{justfile_directory()}}/test-results
     mkdir -p {{justfile_directory()}}/.auth
@@ -66,9 +72,9 @@ e2e-up no_cache="false":
     sed -i 's/^HOST_UID=.*/HOST_UID={{HOST_UID}}/' {{justfile_directory()}}/.env
     sed -i 's/^HOST_GID=.*/HOST_GID={{HOST_GID}}/' {{justfile_directory()}}/.env
     if grep -q '^E2E_DOCKERFILE=' {{justfile_directory()}}/.env; then
-        sed -i 's|^E2E_DOCKERFILE=.*|E2E_DOCKERFILE={{e2e-image-dir}}/Dockerfile|' {{justfile_directory()}}/.env
+        sed -i "s|^E2E_DOCKERFILE=.*|E2E_DOCKERFILE=$E2E_IMAGE_DIR/Dockerfile|" {{justfile_directory()}}/.env
     else
-        echo 'E2E_DOCKERFILE={{e2e-image-dir}}/Dockerfile' >> {{justfile_directory()}}/.env
+        echo "E2E_DOCKERFILE=$E2E_IMAGE_DIR/Dockerfile" >> {{justfile_directory()}}/.env
     fi
     # Resolve AWS_REGION (SDK treats "" as a valid-but-broken region)
     _AWS_REGION="${AWS_REGION:-$(aws configure get region 2>/dev/null || echo "")}"
@@ -81,28 +87,35 @@ e2e-up no_cache="false":
     fi
 
     if [ "{{no_cache}}" = "true" ]; then
-        {{container-tool}} compose --project-directory {{justfile_directory()}} {{e2e-compose-files}} build --no-cache
+        {{container-tool}} compose --project-directory {{justfile_directory()}} $E2E_COMPOSE_FILES build --no-cache
     else
-        {{container-tool}} compose --project-directory {{justfile_directory()}} {{e2e-compose-files}} build
+        {{container-tool}} compose --project-directory {{justfile_directory()}} $E2E_COMPOSE_FILES build
     fi
 
     mkdir -p ~/.kube  # must exist before compose up; Docker creates missing bind-mount sources as root
-    {{container-tool}} compose --project-directory {{justfile_directory()}} {{e2e-compose-files}} up -d e2e
+    {{container-tool}} compose --project-directory {{justfile_directory()}} $E2E_COMPOSE_FILES up -d e2e
     echo "E2E container started. Syncing latest code..."
     just e2e-sync
     echo "✓ E2E container ready"
 
 # Stop E2E container
 e2e-down:
-    @echo "Stopping E2E container..."
-    {{container-tool}} compose --project-directory {{justfile_directory()}} {{e2e-compose-files}} down
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "Stopping E2E container..."
+    E2E_IMAGE_DIR="$(uv run python -c 'from pytest_jupyter_deploy.image import IMAGE_PATH; print(IMAGE_PATH)')"
+    E2E_COMPOSE_FILES="-f $E2E_IMAGE_DIR/docker-compose.yml -f {{justfile_directory()}}/docker-compose.e2e-name.yml"
+    {{container-tool}} compose --project-directory {{justfile_directory()}} $E2E_COMPOSE_FILES down
 
 # Sync workspace files into the running E2E container
 e2e-sync:
     #!/usr/bin/env bash
     set -euo pipefail
 
-    if ! ({{container-tool}} compose --project-directory {{justfile_directory()}} {{e2e-compose-files}} ps e2e) | grep -qE "(Up|running)"; then
+    E2E_IMAGE_DIR="$(uv run python -c 'from pytest_jupyter_deploy.image import IMAGE_PATH; print(IMAGE_PATH)')"
+    E2E_COMPOSE_FILES="-f $E2E_IMAGE_DIR/docker-compose.yml -f {{justfile_directory()}}/docker-compose.e2e-name.yml"
+
+    if ! ({{container-tool}} compose --project-directory {{justfile_directory()}} $E2E_COMPOSE_FILES ps e2e) | grep -qE "(Up|running)"; then
         echo "Error: E2E container is not running. Start it with: just e2e-up"
         exit 1
     fi
@@ -125,7 +138,7 @@ e2e-sync:
     {{container-tool}} exec -i {{e2e-container-name}} tar -xf - -C /workspace
 
     echo "Running uv sync..."
-    {{container-tool}} compose --project-directory {{justfile_directory()}} {{e2e-compose-files}} exec e2e bash -c "cd /workspace && uv sync --all-packages"
+    {{container-tool}} compose --project-directory {{justfile_directory()}} $E2E_COMPOSE_FILES exec e2e bash -c "cd /workspace && uv sync --all-packages"
     echo "✓ E2E container synced"
 
 # Run E2E tests inside the container.
@@ -146,6 +159,9 @@ test-e2e project_dir="sandbox-e2e" test_filter="" options="" template=default-te
     OVERRIDE_FILE=""
     cleanup() { [ -n "$OVERRIDE_FILE" ] && [ -f "$OVERRIDE_FILE" ] && rm -f "$OVERRIDE_FILE"; }
     trap cleanup EXIT
+
+    E2E_IMAGE_DIR="$(uv run python -c 'from pytest_jupyter_deploy.image import IMAGE_PATH; print(IMAGE_PATH)')"
+    E2E_COMPOSE_FILES="-f $E2E_IMAGE_DIR/docker-compose.yml -f {{justfile_directory()}}/docker-compose.e2e-name.yml"
 
     # Determine deploy-from-scratch vs existing-project mode.
     IS_DEPLOYMENT_FROM_SCRATCH="false"
@@ -192,8 +208,8 @@ test-e2e project_dir="sandbox-e2e" test_filter="" options="" template=default-te
 
     echo "Restarting E2E container with project mount..."
     mkdir -p ~/.kube
-    {{container-tool}} compose --project-directory {{justfile_directory()}} {{e2e-compose-files}} down
-    {{container-tool}} compose --project-directory {{justfile_directory()}} {{e2e-compose-files}} -f "$OVERRIDE_FILE" up -d --no-build
+    {{container-tool}} compose --project-directory {{justfile_directory()}} $E2E_COMPOSE_FILES down
+    {{container-tool}} compose --project-directory {{justfile_directory()}} $E2E_COMPOSE_FILES -f "$OVERRIDE_FILE" up -d --no-build
 
     if [ "$SKIP_SYNC" != "true" ]; then
         echo "Re-syncing project files after mount..."
@@ -207,13 +223,10 @@ test-e2e project_dir="sandbox-e2e" test_filter="" options="" template=default-te
         exit 1
     fi
 
-    # --no-cov disables the package's addopts coverage (meant for unit runs); e2e tests
-    # exercise Terraform in a subprocess, so the Python package is never imported and
-    # coverage would only emit "module-not-imported"/"no-data" warnings.
     if [ "$IS_DEPLOYMENT_FROM_SCRATCH" = "true" ]; then
-        PYTEST_ARGS="$E2E_TESTS_DIR -m e2e --no-cov --e2e-tests-dir=$E2E_TESTS_DIR"
+        PYTEST_ARGS="$E2E_TESTS_DIR -m e2e --e2e-tests-dir=$E2E_TESTS_DIR"
     else
-        PYTEST_ARGS="$E2E_TESTS_DIR -m e2e --no-cov --e2e-tests-dir=$E2E_TESTS_DIR --e2e-existing-project={{project_dir}}"
+        PYTEST_ARGS="$E2E_TESTS_DIR -m e2e --e2e-tests-dir=$E2E_TESTS_DIR --e2e-existing-project={{project_dir}}"
     fi
 
     if [ -n "{{test_filter}}" ]; then PYTEST_ARGS="$PYTEST_ARGS -k {{test_filter}}"; fi
@@ -245,7 +258,7 @@ test-e2e project_dir="sandbox-e2e" test_filter="" options="" template=default-te
 
     echo "Running E2E tests (template={{template}}, project={{project_dir}})..."
     echo "================================================"
-    {{container-tool}} compose --project-directory {{justfile_directory()}} {{e2e-compose-files}} exec -e PYTHONUNBUFFERED=1 e2e bash -c "cd /workspace && $PYTEST_CMD $PYTEST_ARGS"
+    {{container-tool}} compose --project-directory {{justfile_directory()}} $E2E_COMPOSE_FILES exec -e PYTHONUNBUFFERED=1 e2e bash -c "cd /workspace && $PYTEST_CMD $PYTEST_ARGS"
 
 # Convenience wrapper for the EKS Karpenter template.
 # Example: just test-e2e-eks-karpenter sandbox-e2e test_configuration            # config only, no AWS
@@ -260,6 +273,13 @@ e2e-all project_dir="sandbox-e2e" test_filter="" options="" no_cache="false" tem
 
 # Clean up E2E artifacts and image
 clean-e2e:
+    #!/usr/bin/env bash
+    set -uo pipefail
     rm -rf test-results .pytest_cache docker-compose.e2e-override.yml
-    {{container-tool}} compose --project-directory {{justfile_directory()}} {{e2e-compose-files}} down -v || true
+    # Best-effort: resolve the base compose dir; if deps aren't synced, skip compose down.
+    E2E_IMAGE_DIR="$(uv run python -c 'from pytest_jupyter_deploy.image import IMAGE_PATH; print(IMAGE_PATH)' 2>/dev/null || true)"
+    if [ -n "$E2E_IMAGE_DIR" ]; then
+        E2E_COMPOSE_FILES="-f $E2E_IMAGE_DIR/docker-compose.yml -f {{justfile_directory()}}/docker-compose.e2e-name.yml"
+        {{container-tool}} compose --project-directory {{justfile_directory()}} $E2E_COMPOSE_FILES down -v || true
+    fi
     {{container-tool}} rmi {{e2e-container-name}}:{{e2e-image-tag}} || true

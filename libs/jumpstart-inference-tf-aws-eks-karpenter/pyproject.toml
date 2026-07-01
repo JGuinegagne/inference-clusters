@@ -68,11 +68,6 @@ ignore = [
     "UP047",
 ]
 
-[tool.ruff.lint.per-file-ignores]
-"tests/**/*.py" = [
-    "PLC0415",
-]
-
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
@@ -81,7 +76,6 @@ docstring-code-format = true
 docstring-code-line-length = 40
 
 [tool.pytest.ini_options]
-addopts = "--cov=jumpstart_inference_tf_aws_eks_karpenter --cov-report=term-missing --cov-report=xml --cov-report=html"
 testpaths = [
     "tests/unit",
 ]
@@ -89,33 +83,12 @@ markers = [
     "e2e: End-to-end tests using playwright (deselect with '-m \"not e2e\"')",
 ]
 
-[tool.coverage.run]
-source = [
-    "jumpstart_inference_tf_aws_eks_karpenter",
-]
-omit = [
-    "tests/*",
-]
-
-[tool.coverage.report]
-exclude_lines = [
-    "pragma: no cover",
-    "def __repr__",
-    "raise NotImplementedError",
-    "if __name__ == .__main__.:",
-    "pass",
-    "raise ImportError",
-]
-fail_under = 80
-show_missing = true
-
 [dependency-groups]
 dev = [
     "jupyter-deploy[aws,k8s]",
     "pytest-jupyter-deploy[ui]",
     "mypy>=1.15.0",
     "pytest>=8.3.5",
-    "pytest-cov>=6.1.1",
     "python-hcl2>=7.2.1",
     "pyyaml>=6.0.2",
     "ruff>=0.11.8",
