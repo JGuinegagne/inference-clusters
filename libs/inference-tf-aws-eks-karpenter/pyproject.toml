@@ -1,7 +1,7 @@
 [project]
 name = "inference-tf-aws-eks-karpenter"
 version = "0.1.0rc1"
-description = "Terraform template to provision a base AWS EKS cluster with Karpenter for JumpStart inference workloads."
+description = "Terraform template to provision a base AWS EKS cluster with Karpenter for inference workloads."
 readme = "README.md"
 authors = [
     { name = "Jonathan Guinegagne", email = "jggg@amazon.com" },

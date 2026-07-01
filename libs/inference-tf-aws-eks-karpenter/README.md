@@ -1,4 +1,4 @@
-# JumpStart Inference — AWS EKS Karpenter base template
+# Inference — AWS EKS Karpenter base template
 
 A [jupyter-deploy](https://github.com/jupyter-infra/jupyter-deploy) Terraform template that
 provisions a **base AWS EKS cluster** with [Karpenter](https://karpenter.sh) for node
