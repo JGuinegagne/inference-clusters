@@ -1,0 +1,51 @@
+# jumpstart-inference: Terraform AWS EKS Karpenter template
+
+## Project organization
+
+This project provisions a base AWS EKS cluster intended as the foundation for inference
+workloads. It uses Terraform as the infrastructure-as-code engine and relies on
+[Karpenter](https://karpenter.sh) for node autoscaling over self-managed nodes.
+
+The template deploys:
+- A VPC with public and private subnets
+- An EKS cluster
+- Karpenter, with NodePools/EC2NodeClasses that provision self-managed nodes on demand
+
+## Usage
+{{ jupyter-deploy-cli-general-instructions }}
+
+## General project information
+{{ show-info-instructions }}
+
+### Configure and create the infrastructure
+{{ config-up-instructions }}
+
+{{ set-variables-with-cmd-instructions }}
+
+{{ set-variables-with-file-instructions }}
+
+{{ read-variables-with-cmd-instructions }}
+
+### View the full terraform logs
+
+{{ history-logs-instructions }}
+
+### Delete all the resources
+
+{{ down-instructions }}
+
+## The terraform project
+
+### Engine directory
+
+The core terraform files are located in `./engine`, including `main.tf`, `variables.tf` and `outputs.tf`.
+Standalone resources are defined in `./engine/modules` as standard terraform modules.
+
+All variables MUST be defined in `./engine/variables.tf` without default values; defaults live in
+`./engine/presets/defaults-all.tfvars`. All `local-exec` provisioners MUST set
+`interpreter = ["/bin/bash", "-c"]`.
+
+### Presets
+`./engine/presets` correspond to optional sets of default variables. Users SHOULD NOT modify these files.
+
+{{ generated-by-footer }}
