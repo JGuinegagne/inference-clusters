@@ -1,4 +1,4 @@
-# JumpStart Inference Clusters
+# Inference Clusters
 
 Monorepo of [jupyter-deploy](https://github.com/jupyter-infra/jupyter-deploy) templates that
 provision **EKS clusters for inference workloads**.

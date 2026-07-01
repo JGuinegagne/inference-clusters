@@ -1,7 +1,7 @@
 [project]
 name = "inference-clusters-monorepo"
 version = "0.1.0"
-description = "Monorepo of jupyter-deploy templates for JumpStart inference EKS clusters"
+description = "Monorepo of jupyter-deploy templates for inference EKS clusters"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
