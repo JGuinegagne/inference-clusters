@@ -5,7 +5,7 @@
 This is a monorepo of [jupyter-deploy](https://github.com/jupyter-infra/jupyter-deploy)
 templates that provision **AWS EKS clusters for inference workloads**.
 
-The `jupyter-deploy` CLI (`jd`) is **not** vendored here — it is consumed as a published
+The `jupyter-deploy` CLI (`jd`) is **not** source-controlled here — it is consumed as a published
 PyPI dependency (`jupyter-deploy[aws,k8s]`). This repo only ships **template packages**:
 data payloads (Terraform, manifests, presets) plus a thin Python shim that registers each
 template with the CLI through a `jupyter_deploy.terraform_templates` entry point.
@@ -79,6 +79,11 @@ E2E tests live in `libs/<package>/tests/e2e` and use the `pytest-jupyter-deploy`
 plugin (the `e2e_deployment` fixture, `undeployed_project` helper, etc.). They run
 inside a container whose image is **vended by `pytest-jupyter-deploy`** — there is no
 Dockerfile in this repo.
+
+The base compose file (vended by the plugin) hardcodes the container/image name to
+`jupyter-deploy-e2e`. We merge a committed override (`docker-compose.e2e-name.yml`) on
+every compose call so this repo's container/image are named `jumpstart-inference-e2e` —
+they never collide with a jupyter-deploy E2E run on the same host.
 
 - `just e2e-up` — build + start the E2E container.
 - `just test-e2e-eks-karpenter sandbox-e2e test_configuration` — run config-only tests
