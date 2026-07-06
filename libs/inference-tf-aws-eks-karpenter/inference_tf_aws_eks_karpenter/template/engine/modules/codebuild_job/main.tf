@@ -1,0 +1,95 @@
+# Reusable CodeBuild job for image mirroring/vendoring (nvcr.io → our ECR today,
+# chart-onboard workload vendoring later). Modeled on the eks-oidc
+# codebuild_job module: trust → role → permissions → project. The job is
+# NO_SOURCE and env-driven; callers pass per-run source/dest via start-build
+# environment-variable overrides.
+
+data "aws_iam_policy_document" "trust" {
+  statement {
+    actions = ["sts:AssumeRole"]
+    principals {
+      type        = "Service"
+      identifiers = ["codebuild.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role" "this" {
+  name               = "${var.project_name}-codebuild"
+  assume_role_policy = data.aws_iam_policy_document.trust.json
+  tags               = var.combined_tags
+}
+
+data "aws_iam_policy_document" "permissions" {
+  statement {
+    sid       = "ECRAuth"
+    actions   = ["ecr:GetAuthorizationToken"]
+    resources = ["*"]
+  }
+
+  # Push (and read-back) only to the specific repos this job targets.
+  statement {
+    sid = "ECRPush"
+    actions = [
+      "ecr:BatchCheckLayerAvailability",
+      "ecr:CompleteLayerUpload",
+      "ecr:InitiateLayerUpload",
+      "ecr:PutImage",
+      "ecr:UploadLayerPart",
+      "ecr:BatchGetImage",
+      "ecr:GetDownloadUrlForLayer",
+    ]
+    resources = var.ecr_repository_arns
+  }
+
+  statement {
+    sid       = "CloudWatchLogs"
+    actions   = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"]
+    resources = ["*"]
+  }
+}
+
+resource "aws_iam_role_policy" "this" {
+  name   = "${var.project_name}-permissions"
+  role   = aws_iam_role.this.id
+  policy = data.aws_iam_policy_document.permissions.json
+}
+
+# Optional extra grant (e.g. the chart-onboard S3 weights ingest read/write).
+resource "aws_iam_role_policy" "extra" {
+  count  = var.extra_policy_json == "" ? 0 : 1
+  name   = "${var.project_name}-extra"
+  role   = aws_iam_role.this.id
+  policy = var.extra_policy_json
+}
+
+resource "aws_codebuild_project" "this" {
+  name         = var.project_name
+  service_role = aws_iam_role.this.arn
+
+  artifacts {
+    type = "NO_ARTIFACTS"
+  }
+
+  source {
+    type      = "NO_SOURCE"
+    buildspec = var.buildspec
+  }
+
+  environment {
+    compute_type    = var.compute_type
+    image           = "aws/codebuild/standard:7.0"
+    type            = "LINUX_CONTAINER"
+    privileged_mode = true
+
+    dynamic "environment_variable" {
+      for_each = var.environment_variables
+      content {
+        name  = environment_variable.key
+        value = environment_variable.value
+      }
+    }
+  }
+
+  tags = var.combined_tags
+}

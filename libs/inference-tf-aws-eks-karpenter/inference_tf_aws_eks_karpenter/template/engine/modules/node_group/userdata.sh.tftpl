@@ -1,0 +1,40 @@
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="//"
+
+--//
+Content-Type: application/node.eks.aws
+
+# nodeadm NodeConfig: enable containerd's per-registry hosts.toml directory.
+# EKS injects the bootstrap NodeConfig as a separate MIME part; nodeadm merges
+# this containerd.config into containerd's config.toml (backup mechanism).
+apiVersion: node.eks.aws/v1alpha1
+kind: NodeConfig
+spec:
+  containerd:
+    config: |
+      [plugins."io.containerd.grpc.v1.cri".registry]
+        config_path = "/etc/containerd/certs.d"
+
+--//
+Content-Type: text/x-shellscript
+
+#!/bin/bash
+# Write a containerd registry mirror (hosts.toml) per trusted upstream so a pull
+# of an upstream ref is redirected to our ECR pull-through repo. BEST-EFFORT
+# BACKUP ONLY: because ECR pull-through namespaces cached repos under a
+# prefix, a bare host-swap drops the prefix segment — so override_path pins the
+# full pull-through path. Primary resolution is explicit image pinning in chart
+# values. This block only needs to land + parse (the assertion this test covers).
+set -euo pipefail
+%{ for host, prefix in mirror_map ~}
+mkdir -p "/etc/containerd/certs.d/${host}"
+cat > "/etc/containerd/certs.d/${host}/hosts.toml" <<EOF
+server = "https://${host}"
+
+[host."https://${ecr_registry}/v2/${prefix}"]
+  capabilities = ["pull", "resolve"]
+  override_path = true
+EOF
+%{ endfor ~}
+
+--//--
