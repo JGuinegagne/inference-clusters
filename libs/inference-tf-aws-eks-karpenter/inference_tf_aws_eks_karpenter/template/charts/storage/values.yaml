@@ -1,0 +1,22 @@
+# All values are injected from Terraform (platform_storage.tf). Defaults here are
+# placeholders so `helm template` renders standalone for linting.
+
+# -- EBS gp3 StorageClass (RWO, dynamic — pod scratch/logs).
+ebs:
+  # -- Mark gp3 as the cluster default StorageClass.
+  default: true
+
+# -- S3-mount (Mountpoint-for-S3) static PV/PVC — read-only weight store.
+s3:
+  # -- Bucket the model store lives in (models/ prefix mounted read-only).
+  bucketName: ""
+  # -- Region of the bucket (Mountpoint mount option).
+  region: ""
+  # -- Key prefix inside the bucket that holds weights.
+  modelsPrefix: models
+  # -- Capacity is a required-but-ignored field for static CSI PVs (Mountpoint has
+  #    no real capacity); this value is a formality.
+  capacity: 1200Gi
+  # -- Namespace + name of the read-only PVC charts mount.
+  claimNamespace: default
+  claimName: model-store

@@ -1,0 +1,68 @@
+# All values are injected from Terraform (platform_karpenter.tf). Defaults here
+# are placeholders so `helm template` renders standalone for linting.
+
+# -- Cluster name (used for karpenter.sh/discovery selectors).
+clusterName: ""
+# -- Discovery tag value on subnets + cluster SG (karpenter.sh/discovery).
+discoveryTag: ""
+# -- Instance profile name (pre-created in Terraform) Karpenter attaches to launched
+#    instances. Used instead of `role` so Karpenter makes no IAM calls.
+nodeInstanceProfile: ""
+
+# -- Consolidation + churn policy shared by all NodePools.
+consolidationPolicy: WhenEmptyOrUnderutilized
+expireAfter: 720h # 30d
+
+# -- CPU NodePool: CPU inference / batch only (NOT controllers — those are on the
+#    system MNG). On-demand only. Selected by instance-CATEGORY +
+#    minimum generation, so newer generations (c7/c8, m7/m8, r7/r8) are adopted
+#    automatically without editing this list.
+cpu:
+  enabled: true
+  instanceFamilies: ["c", "m", "r"] # instance CATEGORIES (karpenter.k8s.aws/instance-category)
+  instanceGeneration: "5" # minimum generation, exclusive (operator Gt → gen > 5)
+
+# -- Default GPU NodePool. On-demand, GPU taint. Selected by explicit instance
+#    FAMILY (not category+generation) because the "g" category also covers
+#    non-NVIDIA/older parts (g4ad is AMD, g4dn is older) — enumerating families
+#    keeps this NVIDIA-only and predictable. To adopt a new generation, ADD its
+#    family here (verified present + NVIDIA in us-west-2 as of 2026-07):
+#      g5   = A10G, g6 = L4, g6e = L40S, g7 = RTX PRO 4500, g7e = RTX PRO Server 6000
+gpuG:
+  instanceFamilies: ["g5", "g6", "g6e", "g7", "g7e"]
+
+# -- High-end GPU NodePool (p4d=A100x8, p5=H100x8, p5en=H200x8). On-demand. Gated
+#    (enabled) because a P node is expensive ($32-98/hr) and quota-constrained.
+#    COST-SAFE ISOLATION: carries a DISTINCT taint (inference/gpu-tier=high) ON TOP of
+#    the shared GPU taint, so a pod reaches P only by opting in on BOTH the label
+#    (nodeSelector inference/accelerator=nvidia-p) AND the tier taint's toleration.
+#    A generic GPU pod (tolerates only nvidia.com/gpu, no accelerator selector) is
+#    repelled from P and falls to the cheaper gpu-g pool — P is never grabbed by
+#    accident, and (same constraint set) never PROVISIONED by accident either.
+#    NOTE: the tier taint key (inference/gpu-tier) MUST differ from the label key
+#    (inference/accelerator) — a key that is both breaks Karpenter scheduling.
+gpuP:
+  enabled: true
+  instanceFamilies: ["p4d", "p5", "p5en"]
+  # -- ODCR seam: P on-demand capacity is scarce, so an org often runs P via a
+  #    Capacity Reservation. Set an ODCR id to pin the pool to a reservation; empty =
+  #    plain on-demand. (When P is reserved/always-on, see the shared-pool seam in the
+  #    README to backfill idle GPUs with gpu-g work.)
+  capacityReservationId: ""
+
+# -- MIG / time-slicing (device-plugin seams, NOT day-1):
+#    MIG (fast-follow) partitions one A100/H100 into up to 7 isolated slices — the
+#    right lever for packing many small models onto one P node. Time-slicing
+#    oversubscribes a GPU WITHOUT memory isolation — a batch/throughput lever only,
+#    unsuitable for latency-sensitive serving. Both are device-plugin config; wire
+#    here when needed.
+
+# -- GPU AMI ID (EKS-optimized AL2023 NVIDIA). Resolved from SSM in Terraform and
+#    injected. Placeholder keeps helm template valid standalone.
+gpuAmiId: ""
+
+# -- Root volume for launched nodes (GPU images are large).
+blockDevice:
+  deviceName: /dev/xvda
+  volumeSizeGi: 200
+  volumeType: gp3
