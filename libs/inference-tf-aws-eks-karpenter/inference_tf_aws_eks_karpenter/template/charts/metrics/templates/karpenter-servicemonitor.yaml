@@ -1,0 +1,24 @@
+{{- /*
+ServiceMonitor pointing Prometheus at Karpenter's controller metrics (autoscaling
+latency, nodeclaim/node lifecycle, disruption). The `release` label is what the
+kube-prometheus-stack Prometheus uses to select ServiceMonitors. Karpenter's Helm
+chart exposes a Service named `karpenter` with an `http-metrics` port (8080).
+*/ -}}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: karpenter
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- toYaml .Values.serviceMonitorLabel | nindent 4 }}
+spec:
+  namespaceSelector:
+    matchNames:
+      - {{ .Values.karpenterNamespace }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: karpenter
+  endpoints:
+    - port: http-metrics
+      path: /metrics
+      interval: 30s

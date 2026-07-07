@@ -48,6 +48,7 @@ resource "null_resource" "cluster_addons" {
     aws_eks_addon.pod_identity_agent,
     aws_eks_addon.ebs_csi_driver,
     aws_eks_addon.s3_csi_driver,
+    aws_eks_addon.cw_observability,
     aws_eks_access_policy_association.admin_role,
     aws_eks_access_policy_association.admin_user,
     aws_eks_access_entry.node,
@@ -132,6 +133,52 @@ resource "aws_eks_addon" "s3_csi_driver" {
   pod_identity_association {
     role_arn        = module.s3_csi_role.role_arn
     service_account = "s3-csi-driver-sa"
+  }
+
+  depends_on = [aws_eks_addon.pod_identity_agent]
+}
+
+# CloudWatch Observability / Container Insights — cluster-wide by design: the CloudWatch
+# agent + Fluent Bit DaemonSets tolerate ALL taints, so they collect metrics/logs from
+# EVERY node (system MNG AND Karpenter GPU nodes). An EKS managed addon like the others
+# above (AWS-managed image reached natively, no pull-through). Gated for cost.
+module "cw_observability_role" {
+  count = var.enable_container_insights ? 1 : 0
+
+  source             = "./modules/iam_role"
+  role_name          = "${local.resource_name_prefix}-cw-observability"
+  assume_role_policy = data.aws_iam_policy_document.pod_identity_trust.json
+  policy_arns        = ["arn:${data.aws_partition.current.partition}:iam::aws:policy/CloudWatchAgentServerPolicy"]
+  combined_tags      = local.combined_tags
+}
+
+resource "aws_eks_addon" "cw_observability" {
+  count = var.enable_container_insights ? 1 : 0
+
+  cluster_name = module.eks_cluster.cluster_name
+  addon_name   = "amazon-cloudwatch-observability"
+  tags         = local.combined_tags
+
+  # Two distinct placements:
+  #  - top-level tolerations: the CloudWatch agent + Fluent Bit DaemonSets tolerate-all
+  #    so they collect from EVERY node, incl. Karpenter GPU nodes.
+  #  - manager.*: the operator Deployment (controller-manager) is a control-loop pod, so
+  #    pin it to the tainted system NG — otherwise it lands on a Karpenter node
+  #    and pins it from consolidating (confirmed manager.{nodeSelector,
+  #    tolerations} in the v6 addon schema).
+  configuration_values = jsonencode({
+    tolerations = [
+      { operator = "Exists" },
+    ]
+    manager = {
+      nodeSelector = local.system_node_selector
+      tolerations  = [local.system_toleration]
+    }
+  })
+
+  pod_identity_association {
+    role_arn        = module.cw_observability_role[0].role_arn
+    service_account = "cloudwatch-agent"
   }
 
   depends_on = [aws_eks_addon.pod_identity_agent]

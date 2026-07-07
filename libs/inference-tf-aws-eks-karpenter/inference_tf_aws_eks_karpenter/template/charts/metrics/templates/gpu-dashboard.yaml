@@ -1,0 +1,56 @@
+{{- /*
+Grafana dashboard: GPU utilization/memory/temperature from DCGM (the POC's
+"define a dashboard with the key metrics" deliverable). The Grafana sidecar loads
+any ConfigMap carrying the grafanaDashboardLabel; the JSON is a compact DCGM board
+built on the standard DCGM_FI_DEV_* series the exporter emits.
+*/ -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gpu-dcgm-dashboard
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{ .Values.grafanaDashboardLabel }}: "1"
+data:
+  gpu-dcgm.json: |
+    {
+      "title": "GPU / DCGM",
+      "uid": "inference-gpu-dcgm",
+      "schemaVersion": 39,
+      "timezone": "browser",
+      "time": { "from": "now-1h", "to": "now" },
+      "panels": [
+        {
+          "type": "timeseries",
+          "title": "GPU Utilization (%)",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+          "targets": [
+            { "expr": "DCGM_FI_DEV_GPU_UTIL", "legendFormat": "{{`{{Hostname}}`}} gpu{{`{{gpu}}`}}" }
+          ]
+        },
+        {
+          "type": "timeseries",
+          "title": "GPU Memory Used (MiB)",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+          "targets": [
+            { "expr": "DCGM_FI_DEV_FB_USED", "legendFormat": "{{`{{Hostname}}`}} gpu{{`{{gpu}}`}}" }
+          ]
+        },
+        {
+          "type": "timeseries",
+          "title": "GPU Temperature (C)",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+          "targets": [
+            { "expr": "DCGM_FI_DEV_GPU_TEMP", "legendFormat": "{{`{{Hostname}}`}} gpu{{`{{gpu}}`}}" }
+          ]
+        },
+        {
+          "type": "timeseries",
+          "title": "GPU Power (W)",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+          "targets": [
+            { "expr": "DCGM_FI_DEV_POWER_USAGE", "legendFormat": "{{`{{Hostname}}`}} gpu{{`{{gpu}}`}}" }
+          ]
+        }
+      ]
+    }
