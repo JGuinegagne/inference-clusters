@@ -1,0 +1,20 @@
+# Conforming consumer chart values.
+#
+# images: — MANDATED. Every image is a structured, addressable object
+# {registry, repository, tag}; the onboard job rehosts each by digest to
+# <our-ecr>/workload/<repository>@<digest> and rewrites this block in the emitted
+# overrides.yaml. registry:"" means "the source registry's default" (Docker Hub);
+# here we use a tiny real public image so the digest-vendor step has something to copy.
+images:
+  server:
+    registry: public.ecr.aws
+    repository: docker/library/busybox
+    tag: "1.36"
+
+# No weights: block — this is the minimal, self-contained conforming chart (images
+# only), so the live onboard E2E has no dependency on an external weight source. The
+# weights override-emit logic is covered by the scripted unit test (which injects a
+# weights: block, DRY_RUN); live weights INGEST is exercised separately (real model + FSx).
+
+# Non-artifact knobs a deployer sets themselves (never touched by onboard).
+replicas: 1

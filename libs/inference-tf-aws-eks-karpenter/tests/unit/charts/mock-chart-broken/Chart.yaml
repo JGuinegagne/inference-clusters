@@ -1,0 +1,10 @@
+apiVersion: v2
+name: mock-chart-broken
+version: 0.1.0
+description: >-
+  Deliberately NON-conforming consumer chart: a template hardcodes an upstream image
+  ref instead of rendering through the images: block / chart.image helper. The
+  onboard backstop (helm template + assert every image resolves to our ECR) MUST
+  fail this chart — proving a convention violation is caught at onboarding, not as a
+  hung ImagePullBackOff pod on the no-NAT VPC.
+type: application

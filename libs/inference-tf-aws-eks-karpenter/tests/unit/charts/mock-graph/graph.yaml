@@ -1,0 +1,44 @@
+# Conforming consumer KRO graph (Path B) — a valid ResourceGraphDefinition with
+# LITERAL upstream refs baked in, so it also applies on a NON-air-gapped cluster. The
+# onboard job reads the field-paths listed in values.yaml, rehosts what they point at,
+# and writes a rewritten COPY (graph-air-gapped.yaml); this file stays pristine.
+#
+# A rehostable field must hold a BARE ref as its whole value (an image ref, or a weight
+# source URI) — onboard replaces the entire value, so a ref embedded in "--model=<uri>"
+# can't be a field-path (surface it as its own field the CEL then composes).
+apiVersion: kro.run/v1alpha1
+kind: ResourceGraphDefinition
+metadata:
+  name: servable-mock
+spec:
+  schema:
+    apiVersion: v1alpha1
+    kind: ServableMock
+    spec:
+      replicas: integer | default=1
+  resources:
+    - id: deployment
+      template:
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: ${schema.metadata.name}
+        spec:
+          replicas: ${schema.spec.replicas}
+          selector:
+            matchLabels:
+              app: ${schema.metadata.name}
+          template:
+            metadata:
+              labels:
+                app: ${schema.metadata.name}
+            spec:
+              containers:
+                - name: server
+                  # LITERAL upstream ref — onboard rewrites this to our ECR by digest.
+                  image: public.ecr.aws/docker/library/busybox:1.36
+                  env:
+                    # BARE weight source URI — onboard rewrites to our S3 URI; the CEL
+                    # composes it into the serving args elsewhere.
+                    - name: WEIGHTS_SOURCE
+                      value: s3://some-src/w/mock-tiny

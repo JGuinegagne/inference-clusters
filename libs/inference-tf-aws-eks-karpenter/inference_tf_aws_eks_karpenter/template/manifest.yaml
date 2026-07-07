@@ -7,6 +7,12 @@ requirements:
 - name: terraform
 - name: awscli
 - name: kubectl
+# jd health: aggregate deployment-stack health. The cluster/components/images layers
+# apply; the connection + load-balancer layers self-skip (this is an endpoints-only VPC
+# with no public ingress/ELB — an end-to-end URL check is meaningless, so no open_url and
+# no cluster.loadbalancer.health command is intentional, not a gap).
+health:
+  active: true
 values:
 - name: deployment_id
   source: output
@@ -14,7 +20,328 @@ values:
 - name: aws_region
   source: output
   source-key: region
-# NOTE: cluster_name, cluster_endpoint, kubeconfig_path values are added once the
-# corresponding outputs land (see engine/outputs.tf).
+- name: cluster_name
+  source: output
+  source-key: cluster_name
+- name: cluster_endpoint
+  source: output
+  source-key: cluster_endpoint
+- name: cluster_ca_certificate
+  source: output
+  source-key: cluster_ca_certificate
+- name: kubeconfig_path
+  source: output
+  source-key: kubeconfig_path
 project-store:
   store-type: s3-only
+commands:
+- cmd: cluster.login
+  sequence:
+  - api-name: aws.eks.update-kubeconfig
+    arguments:
+    - api-attribute: cluster_name
+      source: output
+      source-key: cluster_name
+  results:
+  - result-name: cluster.login.output
+    source: result
+    source-key: '[0].Output'
+- cmd: cluster.status
+  sequence:
+  - api-name: aws.eks.describe-cluster
+    arguments:
+    - api-attribute: cluster_name
+      source: output
+      source-key: cluster_name
+  results:
+  - result-name: cluster.status
+    source: result
+    source-key: '[0].Status'
+- cmd: cluster.show
+  sequence:
+  - api-name: aws.eks.describe-cluster
+    arguments:
+    - api-attribute: cluster_name
+      source: output
+      source-key: cluster_name
+  results:
+  - result-name: cluster.show.name
+    source: result
+    source-key: '[0].ClusterName'
+  - result-name: cluster.show.label
+    source: result
+    source-key: '[0].Label'
+  - result-name: cluster.show.status
+    source: result
+    source-key: '[0].Status'
+  - result-name: cluster.show.endpoint
+    source: result
+    source-key: '[0].Endpoint'
+  - result-name: cluster.show.version
+    source: result
+    source-key: '[0].Version'
+- cmd: host.list
+  sequence:
+  - api-name: k8s.core.list-nodes
+    arguments:
+    - api-attribute: query
+      source: cli
+      source-key: query
+    - api-attribute: page_size
+      source: cli
+      source-key: limit
+    - api-attribute: pagination_token
+      source: cli
+      source-key: continue_from
+  results:
+  - result-name: host.list
+    source: result
+    source-key: '[0].NodeNames'
+  - result-name: host.list.next_token
+    source: result
+    source-key: '[0].NextToken'
+- cmd: host.status
+  sequence:
+  - api-name: k8s.core.get-node
+    arguments:
+    - api-attribute: name
+      source: cli
+      source-key: name
+  results:
+  - result-name: host.status
+    source: result
+    source-key: '[0].Status'
+- cmd: host.show
+  sequence:
+  - api-name: k8s.core.get-node
+    arguments:
+    - api-attribute: name
+      source: cli
+      source-key: name
+  results:
+  - result-name: host.show.name
+    source: result
+    source-key: '[0].Name'
+  - result-name: host.show.status
+    source: result
+    source-key: '[0].Status'
+  - result-name: host.show.resource
+    source: result
+    source-key: '[0].Resource'
+# --- jd health: component + image status ---
+# Deployment status backs the components: block (Karpenter, KEDA x3, prometheus-operator,
+# Grafana, kube-state-metrics, KRO). The CLI has no DaemonSet/StatefulSet status method,
+# so DCGM (DaemonSet) and the Prometheus server (StatefulSet) are not covered yet.
+- cmd: component.deployment.status
+  sequence:
+  - api-name: k8s.apps.get-deployment-status
+    arguments:
+    - api-attribute: name
+      source: cli
+      source-key: name
+    - api-attribute: scope
+      source: cli
+      source-key: scope
+  results:
+  - result-name: component.deployment.status.status
+    source: result
+    source-key: '[0].Status'
+  - result-name: component.deployment.status.status_category
+    source: result
+    source-key: '[0].StatusCategory'
+  - result-name: component.deployment.status.details
+    source: result
+    source-key: '[0].Details'
+  - result-name: component.deployment.status.sub_component
+    source: result
+    source-key: '[0].SubComponent'
+# Image status backs the images: block — confirms each vendored platform image landed in
+# our ECR (the air-gapped failure mode this VPC is prone to). The image handler calls
+# image.tags first (to pick the latest tag to probe), so both commands are required.
+- cmd: image.tags
+  sequence:
+  - api-name: aws.ecr.list-image-tags
+    arguments:
+    - api-attribute: repository_name
+      source: cli
+      source-key: repository_name
+  results:
+  - result-name: image.tags.tags
+    source: result
+    source-key: '[0].Tags'
+- cmd: image.status
+  sequence:
+  - api-name: aws.ecr.describe-image
+    arguments:
+    - api-attribute: repository_name
+      source: cli
+      source-key: repository_name
+    - api-attribute: image_tag
+      source: cli
+      source-key: image_tag
+  results:
+  - result-name: image.status.status
+    source: result
+    source-key: '[0].Status'
+  - result-name: image.status.status_category
+    source: result
+    source-key: '[0].StatusCategory'
+# CVE summary for the images layer's sub-component (informational — the health status is
+# ECR-presence only; this adds critical/high counts). Requires AWS Inspector2 enhanced ECR
+# scanning enabled on the account; when it isn't, the sub-component shows "scan n/a".
+- cmd: image.vulnerabilities
+  sequence:
+  - api-name: aws.inspector2.list-vulnerabilities
+    arguments:
+    - api-attribute: repository_name
+      source: cli
+      source-key: repository_name
+    - api-attribute: image_tag
+      source: cli
+      source-key: image_tag
+  results:
+  - result-name: image.vulnerabilities.vulnerabilities
+    source: result
+    source-key: '[0].Vulnerabilities'
+  - result-name: image.vulnerabilities.last_scanned
+    source: result
+    source-key: '[0].LastScanned'
+  - result-name: image.vulnerabilities.critical_count
+    source: result
+    source-key: '[0].CriticalCount'
+  - result-name: image.vulnerabilities.high_count
+    source: result
+    source-key: '[0].HighCount'
+  - result-name: image.vulnerabilities.scanner_type
+    source: result
+    source-key: '[0].ScannerType'
+# --- jd health: platform components ---
+# The Deployment-type platform operators. `scope` resolves to the namespace output; the
+# component key is the human label; `resource-name` is the actual Deployment name when it
+# differs from the key. (DCGM DaemonSet + Prometheus StatefulSet are omitted: the CLI has
+# no daemonset/statefulset status method — tracked upstream.)
+components:
+  karpenter:
+    type: Deployment
+    description: Node autoscaler (provisions GPU/CPU nodes on pending pods)
+    scope: karpenter_namespace
+    verbs:
+      status:
+        method: k8s.apps.get-deployment-status
+  keda-operator:
+    type: Deployment
+    description: Pod autoscaler (scales workloads on metrics/queue depth)
+    resource-name: keda-operator
+    scope: keda_namespace
+    verbs:
+      status:
+        method: k8s.apps.get-deployment-status
+  keda-metrics-apiserver:
+    type: Deployment
+    description: KEDA external-metrics API server
+    resource-name: keda-operator-metrics-apiserver
+    scope: keda_namespace
+    verbs:
+      status:
+        method: k8s.apps.get-deployment-status
+  keda-admission-webhooks:
+    type: Deployment
+    description: KEDA admission webhooks
+    resource-name: keda-admission-webhooks
+    scope: keda_namespace
+    verbs:
+      status:
+        method: k8s.apps.get-deployment-status
+  prometheus-operator:
+    type: Deployment
+    description: Prometheus/monitoring stack operator
+    resource-name: kube-prometheus-stack-operator
+    scope: monitoring_namespace
+    verbs:
+      status:
+        method: k8s.apps.get-deployment-status
+  grafana:
+    type: Deployment
+    description: Metrics dashboards
+    resource-name: kube-prometheus-stack-grafana
+    scope: monitoring_namespace
+    verbs:
+      status:
+        method: k8s.apps.get-deployment-status
+  kube-state-metrics:
+    type: Deployment
+    description: Kubernetes object metrics exporter
+    resource-name: kube-prometheus-stack-kube-state-metrics
+    scope: monitoring_namespace
+    verbs:
+      status:
+        method: k8s.apps.get-deployment-status
+  kro:
+    type: Deployment
+    description: Kube Resource Orchestrator (expands workload CRs)
+    scope: kro_namespace
+    verbs:
+      status:
+        method: k8s.apps.get-deployment-status
+# --- jd health: vendored platform images ---
+# Confirms each image the template vendors to ECR (the air-gapped failure mode) is present.
+# Workload/* images (chart-onboarded at runtime) are excluded — not known at template time.
+images:
+  keda-operator:
+    description: KEDA operator image
+    repository-output: keda_operator_ecr_repository
+    tag-output: vendored_image_tag
+  keda-metrics-apiserver:
+    description: KEDA metrics-apiserver image
+    repository-output: keda_metrics_apiserver_ecr_repository
+    tag-output: vendored_image_tag
+  keda-admission-webhooks:
+    description: KEDA admission-webhooks image
+    repository-output: keda_admission_webhooks_ecr_repository
+    tag-output: vendored_image_tag
+  grafana:
+    description: Grafana image
+    repository-output: grafana_ecr_repository
+    tag-output: vendored_image_tag
+  dcgm-exporter:
+    description: NVIDIA DCGM GPU-metrics exporter image
+    repository-output: dcgm_exporter_ecr_repository
+    tag-output: vendored_image_tag
+  device-plugin:
+    description: NVIDIA k8s device-plugin image
+    repository-output: device_plugin_ecr_repository
+    tag-output: vendored_image_tag
+supervised-execution:
+  config:
+    config.terraform-plan:
+      default-phase:
+        label: Reading data sources
+        progress-pattern: (Read complete after|Refreshing state)
+        progress-events-estimate: 120
+  up:
+    up.terraform-apply:
+      phases:
+      - enter-pattern: '(module\.vpc|module\.cluster_role|module\.node_role)'
+        exit-pattern: 'module\.vpc.*Creation complete'
+        label: Creating VPC
+        weight: 10
+        progress-pattern: '(Creation complete|Still creating)'
+        progress-events-estimate: 20
+      - enter-pattern: 'module\.eks_cluster\.aws_eks_cluster'
+        exit-pattern: 'module\.eks_cluster\.aws_eks_cluster.*Creation complete'
+        label: Creating EKS cluster
+        weight: 55
+        progress-pattern: '(Creation complete|Still creating)'
+        progress-events-estimate: 60
+      - enter-pattern: '(aws_eks_addon|aws_eks_access_entry|time_sleep|module\.node_group)'
+        exit-pattern: 'module\.node_group.*Creation complete'
+        label: Provisioning nodes and add-ons
+        weight: 25
+        progress-pattern: '(Creation complete|Still creating)'
+        progress-events-estimate: 40
+      - enter-pattern: '(helm_release|module\.image_vendor|null_resource\.image_vendor)'
+        exit-pattern: 'helm_release\.kro_starters.*Creation complete'
+        label: Deploying platform (autoscaling, storage, observability)
+        weight: 15
+        progress-pattern: '(Creation complete|Still creating)'
+        progress-events-estimate: 25

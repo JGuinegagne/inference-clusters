@@ -1,0 +1,21 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-broken
+spec:
+  replicas: {{ .Values.replicas }}
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}-broken
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}-broken
+    spec:
+      containers:
+        - name: server
+          # CONTRACT VIOLATION: hardcoded upstream ref, bypasses the images: block +
+          # overrides rewrite. Has no pull path on the endpoints-only VPC. The onboard
+          # backstop must reject this (image does not resolve to our ECR).
+          image: docker.io/library/nginx:latest
+          command: ["sleep", "3600"]
