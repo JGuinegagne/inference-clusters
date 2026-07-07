@@ -1,0 +1,144 @@
+{{- /*
+Starter KRO ResourceGraphDefinition: the consumer inference contract as code.
+
+A consumer creates ONE `InferenceDeployment` CR with a handful of fields, and
+KRO expands it into the standardized graph every inference workload needs on this
+cluster:
+  - Deployment  — GPU nodeSelector + taint toleration baked in, so a chart
+                  author can't forget them and strand pods Pending forever.
+  - Service     — stable ClusterIP the ServiceMonitor + callers target.
+  - ScaledObject (KEDA) — pod autoscaling on a Prometheus query. This is the
+                  t0 of the autoscaling loop: KEDA scales pods -> Pending -> Karpenter
+                  scales nodes.
+  - ServiceMonitor — carries the release label so kube-prometheus-stack scrapes it
+                  (the lesson learned: without release=<stack>, Prometheus ignores it).
+
+This encodes the contract that otherwise lives as prose in AGENT.md. A consumer
+instantiates it, tweaks a field, or forks the RGD — but starts from a graph that is
+correct-by-construction for THIS cluster's GPU/scaling/scraping conventions.
+
+NB: KRO uses SimpleSchema; its CEL refs use `${...}` — orthogonal to Helm's `{{ }}`,
+so both coexist here. The Helm values only fill CLUSTER constants (GPU label, SM
+label); the per-workload fields come from the CR's spec at instantiation time.
+*/ -}}
+apiVersion: kro.run/v1alpha1
+kind: ResourceGraphDefinition
+metadata:
+  name: inference-deployment
+spec:
+  # The CRD KRO generates + the schema a consumer fills in.
+  schema:
+    apiVersion: v1alpha1
+    kind: InferenceDeployment
+    spec:
+      # Fully-qualified, VENDORED workload image (digest-pinned via chart-onboard).
+      # Required — there is no sensible default for "which model server".
+      image: string | required=true
+      # Container port the model server serves traffic + /metrics on. A single port
+      # covers the common case (most model servers expose /metrics on the serving
+      # port); a workload that splits them forks this RGD.
+      port: integer | default=8000
+      # GPUs per replica (nvidia.com/gpu limit).
+      gpuCount: integer | default=1
+      # KEDA autoscaling bounds. minReplicas=0 enables scale-to-zero (batch); a
+      # latency-sensitive path MUST set >=1 or the first request after idle pays the
+      # full cold-start chain (Karpenter provision + image pull + weight load). The
+      # scale-to-zero decision belongs to each workload — this default is the safe one.
+      minReplicas: integer | default=1
+      maxReplicas: integer | default=4
+      # PromQL query KEDA scales on (e.g. GPU util via DCGM, requests-in-flight). The
+      # metric definition is the consumer's — the cluster only provides the scrape surface.
+      scaleQuery: string | required=true
+      # Scale-up threshold the query is compared against.
+      scaleThreshold: string | default="70"
+    status:
+      # Surfaced back onto the InferenceDeployment CR from the child Deployment.
+      availableReplicas: ${deployment.status.availableReplicas}
+
+  resources:
+    - id: deployment
+      template:
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: ${schema.metadata.name}
+        spec:
+          replicas: ${schema.spec.minReplicas}
+          selector:
+            matchLabels:
+              app: ${schema.metadata.name}
+          template:
+            metadata:
+              labels:
+                app: ${schema.metadata.name}
+            spec:
+              # Land on the Karpenter GPU NodePool: the label selects GPU
+              # nodes and the toleration lets the pod past the GPU taint. Baked in so
+              # a consumer cannot omit them.
+              nodeSelector:
+                inference/accelerator: {{ .Values.karpenterGpuNodeSelector | quote }}
+              tolerations:
+                - key: nvidia.com/gpu
+                  operator: Exists
+                  effect: NoSchedule
+              containers:
+                - name: server
+                  image: ${schema.spec.image}
+                  ports:
+                    - name: http
+                      containerPort: ${schema.spec.port}
+                  resources:
+                    limits:
+                      nvidia.com/gpu: ${schema.spec.gpuCount}
+
+    - id: service
+      template:
+        apiVersion: v1
+        kind: Service
+        metadata:
+          name: ${schema.metadata.name}
+        spec:
+          selector:
+            app: ${schema.metadata.name}
+          ports:
+            - name: http
+              port: ${schema.spec.port}
+              targetPort: ${schema.spec.port}
+
+    - id: scaledobject
+      template:
+        apiVersion: keda.sh/v1alpha1
+        kind: ScaledObject
+        metadata:
+          name: ${schema.metadata.name}
+        spec:
+          scaleTargetRef:
+            name: ${schema.metadata.name}
+          minReplicaCount: ${schema.spec.minReplicas}
+          maxReplicaCount: ${schema.spec.maxReplicas}
+          triggers:
+            - type: prometheus
+              metadata:
+                # In-cluster kube-prometheus-stack Prometheus.
+                serverAddress: http://kube-prometheus-stack-prometheus.monitoring.svc:9090
+                query: ${schema.spec.scaleQuery}
+                threshold: ${schema.spec.scaleThreshold}
+
+    - id: servicemonitor
+      template:
+        apiVersion: monitoring.coreos.com/v1
+        kind: ServiceMonitor
+        metadata:
+          name: ${schema.metadata.name}
+          labels:
+            # The release label kube-prometheus-stack's Prometheus selects on —
+            # lesson learned: without it the target is silently ignored.
+            release: {{ .Values.serviceMonitorLabel | quote }}
+        spec:
+          selector:
+            matchLabels:
+              app: ${schema.metadata.name}
+          endpoints:
+            - port: http
+              path: /metrics
+              interval: 30s
