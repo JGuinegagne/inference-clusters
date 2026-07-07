@@ -1,5 +1,5 @@
 # Reusable CodeBuild job for image mirroring/vendoring (nvcr.io → our ECR today,
-# chart-onboard workload vendoring later). Modeled on the eks-oidc
+# onboarder workload vendoring later). Modeled on the eks-oidc
 # codebuild_job module: trust → role → permissions → project. The job is
 # NO_SOURCE and env-driven; callers pass per-run source/dest via start-build
 # environment-variable overrides.
@@ -55,12 +55,19 @@ resource "aws_iam_role_policy" "this" {
   policy = data.aws_iam_policy_document.permissions.json
 }
 
-# Optional extra grant (e.g. the chart-onboard S3 weights ingest read/write).
+# Optional extra grant (e.g. the onboarder S3 weights ingest read/write).
 resource "aws_iam_role_policy" "extra" {
   count  = var.extra_policy_json == "" ? 0 : 1
   name   = "${var.project_name}-extra"
   role   = aws_iam_role.this.id
   policy = var.extra_policy_json
+}
+
+# AWS-managed policy attachments (e.g. AmazonS3ReadOnlyAccess for reading weight sources).
+resource "aws_iam_role_policy_attachment" "managed" {
+  for_each   = toset(var.managed_policy_arns)
+  role       = aws_iam_role.this.name
+  policy_arn = each.value
 }
 
 resource "aws_codebuild_project" "this" {

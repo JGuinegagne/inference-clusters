@@ -122,9 +122,9 @@ output "ecr_registry" {
   value       = local.ecr_registry
 }
 
-output "chart_onboard_codebuild_project" {
-  description = "Name of the chart-onboard CodeBuild project to imports model weights and component images."
-  value       = module.chart_onboard.project_name
+output "onboarder_codebuild_project" {
+  description = "Name of the onboarder CodeBuild project to imports model weights and component images."
+  value       = module.onboarder.project_name
 }
 
 output "models_s3_uri" {
@@ -132,12 +132,12 @@ output "models_s3_uri" {
   value       = local.models_s3_uri
 }
 
-output "chart_onboard_input_s3_uri" {
+output "onboarder_input_s3_uri" {
   description = "S3 URI prefix where the onboard job outputs a consumer chart tarball."
   value       = local.rehost_in_s3_uri
 }
 
-output "chart_onboard_output_s3_uri" {
+output "onboarder_output_s3_uri" {
   description = "S3 URI prefix where the onboard job writes the overrides.yaml."
   value       = local.rehost_out_s3_uri
 }

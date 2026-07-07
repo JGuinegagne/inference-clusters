@@ -1,7 +1,7 @@
 # === Storage day-1 path ===
 #
 # The template ships storage INFRASTRUCTURE only — the shared bucket, the node/pod S3
-# grant, the two StorageClasses — never any weights (those arrive via chart-onboard).
+# grant, the two StorageClasses — never any weights (those arrive via onboarder).
 # Day-1 offers two weight-serving paths, both fed by the same bucket:
 #   1. S3-direct: the engine streams weights straight from S3 (vLLM RunAI streamer /
 #      Tensorizer / SDK) using the NODE ROLE's S3 grant — no filesystem.
@@ -20,7 +20,7 @@ module "model_store" {
 
 locals {
   # Key-prefix conventions inside the one bucket (no resources — just documented
-  # layout). models/ = weights (written by chart-onboard); intake/+output/ = batch.
+  # layout). models/ = weights (written by onboarder); intake/+output/ = batch.
   model_store_models_prefix = "models"
   model_store_output_prefix = "output"
 }

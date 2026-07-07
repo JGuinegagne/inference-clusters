@@ -55,13 +55,6 @@ enable_container_insights           = true
 keda_chart_version = "2.20.1"
 kro_chart_version  = "0.9.2"
 
-# --- Chart-onboard weight sources ---
-# S3 buckets the onboard job may read as weight sources. Default: the regional
-# SageMaker JumpStart public cache (the AWS-native model catalog). The onboard job
-# signs its requests, so even a public bucket needs this explicit read grant. Add a
-# bucket to onboard weights pre-staged in another same-region bucket.
-onboard_weight_source_buckets = ["jumpstart-cache-prod-us-west-2"]
-
 # --- Image supply: common-utility images via pull-through ---
 # Each entry MUST use a no-creds trusted upstream (public.ecr.aws/quay.io/registry.k8s.io).
 common_images = []

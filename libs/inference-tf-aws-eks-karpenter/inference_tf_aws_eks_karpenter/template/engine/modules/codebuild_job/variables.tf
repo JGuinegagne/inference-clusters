@@ -23,12 +23,18 @@ variable "combined_tags" {
 
 variable "compute_type" {
   type        = string
-  description = "CodeBuild compute type. Default SMALL fits image mirroring; chart-onboard weight ingest (10s-100s of GB) needs a larger type."
+  description = "CodeBuild compute type. Default SMALL fits image mirroring; onboarder weight ingest (10s-100s of GB) needs a larger type."
   default     = "BUILD_GENERAL1_SMALL"
 }
 
 variable "extra_policy_json" {
   type        = string
-  description = "Optional additional IAM policy (JSON) attached to the job role — e.g. S3 read/write for the chart-onboard weights ingest. Empty = none."
+  description = "Optional additional IAM policy (JSON) attached to the job role — e.g. S3 read/write for the onboarder weights ingest. Empty = none."
   default     = ""
+}
+
+variable "managed_policy_arns" {
+  type        = list(string)
+  description = "AWS-managed policy ARNs to attach to the job role — e.g. AmazonS3ReadOnlyAccess so the onboarder can read any weight-source bucket. Empty = none."
+  default     = []
 }

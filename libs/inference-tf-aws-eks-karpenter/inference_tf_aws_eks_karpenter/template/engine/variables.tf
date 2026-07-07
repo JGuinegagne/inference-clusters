@@ -295,22 +295,6 @@ variable "gpu_p_capacity_reservation_id" {
   type        = string
 }
 
-variable "onboard_weight_source_buckets" {
-  description = <<-EOT
-    S3 bucket names the chart-onboard job may READ as weight sources.
-
-    In addition to this deployment's own bucket. A chart's weights: s3:// source
-    must live in one of these — the onboard job signs its requests, so a public
-    bucket still needs an explicit read grant. Defaults to the regional SageMaker
-    JumpStart cache (jumpstart-cache-prod-<region>), the AWS-native model catalog.
-    Add a bucket here to onboard weights a team pre-staged in another same-region
-    bucket.
-
-    Recommended: ["jumpstart-cache-prod-us-west-2"]
-  EOT
-  type        = list(string)
-}
-
 variable "common_images" {
   description = <<-EOT
     Common-utility image paths (busybox/certgen-class) made available to all nodes via ECR pull-through.
