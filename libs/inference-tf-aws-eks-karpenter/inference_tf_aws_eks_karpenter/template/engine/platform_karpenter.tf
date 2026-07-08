@@ -216,6 +216,20 @@ resource "helm_release" "karpenter_nodepools" {
   chart     = "${path.module}/../charts/karpenter"
   namespace = local.karpenter_namespace
 
+  # wait=false is load-bearing for DESTROY. This chart owns the NodePool +
+  # EC2NodeClass CRs, which carry Karpenter finalizers that block deletion until
+  # every NodeClaim (node) is drained. With the provider's default wait=true, the
+  # uninstall BLOCKS on those finalizers and hits the helm timeout (300s) long
+  # before a GPU node drains — failing `jd down` before null_resource.karpenter_drain
+  # (destroy order: this release first, then the poller) ever runs. wait=false lets
+  # uninstall issue the CR deletes and return; the CRs go Terminating and the drain
+  # poller (controller still alive) owns the drain with its 600s window + EC2 force
+  # path. The poller — not this uninstall — is the single thing that blocks on drain.
+  # `wait` is shared across install/upgrade/uninstall, but this is a CR-only chart
+  # (NodePool + EC2NodeClass) and helm's wait gates only built-in workload kinds, never
+  # CRs — so wait=false is a no-op on apply and only changes the destroy path.
+  wait = false
+
   set = [
     { name = "clusterName", value = module.eks_cluster.cluster_name },
     { name = "discoveryTag", value = local.cluster_name },
