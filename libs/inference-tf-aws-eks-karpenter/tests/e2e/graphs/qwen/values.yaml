@@ -1,0 +1,11 @@
+# Path-B onboard sidecar: the field-paths in graph.yaml the onboard job must
+# rehost. Each is a bare dotted/[N]-indexed path whose value is a LITERAL ref — onboard
+# reads it, vendors it, and writes our ref back into graph-air-gapped.yaml. Every OTHER
+# value in graph.yaml is ignored.
+images:
+  - spec.resources[0].template.spec.template.spec.containers[0].image
+weights:
+  # `field-path=name`: name is the models/<name> subdir the workload reads. It MUST match
+  # the graph's read path (--model=/models/qwen2.5-7b), which onboard does NOT rewrite —
+  # the JumpStart source's last segment is "v1.0.0", so the explicit name is required.
+  - spec.resources[0].template.spec.template.spec.containers[0].env[0].value=qwen2.5-7b

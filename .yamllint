@@ -78,3 +78,6 @@ ignore: |
   build/
   *.egg-info/
   **/charts/*/templates/
+  # Helm test charts (Go-templated + flow-map values, not plain YAML)
+  **/tests/unit/charts/
+  **/tests/e2e/charts/

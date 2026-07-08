@@ -1,0 +1,112 @@
+{{- /*
+NodePools (karpenter.sh/v1). On-demand only — no spot anywhere.
+  - cpu:   CPU inference / batch. c/m/r families, amd64.
+  - gpu-g: default GPU (A10G/L4). g-families, GPU taint so only GPU-tolerating
+           inference pods land; label inference/accelerator for chart targeting.
+  - gpu-p: high-end GPU (A100/H100/H200), gated. g-pool's twin but with a DISTINCT
+           taint (inference/accelerator=nvidia-p) on top of the shared GPU taint, so
+           P requires explicit opt-in on both label + toleration — cost-safe by
+           default (a generic GPU pod falls to gpu-g, never provisions a P node).
+*/ -}}
+{{- if .Values.cpu.enabled }}
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: cpu
+spec:
+  template:
+    spec:
+      nodeClassRef:
+        group: karpenter.k8s.aws
+        kind: EC2NodeClass
+        name: cpu
+      expireAfter: {{ .Values.expireAfter }}
+      requirements:
+        - key: kubernetes.io/arch
+          operator: In
+          values: ["amd64"]
+        - key: karpenter.sh/capacity-type
+          operator: In
+          values: ["on-demand"]
+        - key: karpenter.k8s.aws/instance-category
+          operator: In
+          values: {{ .Values.cpu.instanceFamilies | toJson }}
+        - key: karpenter.k8s.aws/instance-generation
+          operator: Gt
+          values: ["{{ .Values.cpu.instanceGeneration }}"]
+  disruption:
+    consolidationPolicy: {{ .Values.consolidationPolicy }}
+    consolidateAfter: 1m
+{{- end }}
+---
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: gpu-g
+spec:
+  template:
+    metadata:
+      labels:
+        inference/accelerator: nvidia-g
+    spec:
+      nodeClassRef:
+        group: karpenter.k8s.aws
+        kind: EC2NodeClass
+        name: gpu
+      expireAfter: {{ .Values.expireAfter }}
+      taints:
+        - key: nvidia.com/gpu
+          value: "present"
+          effect: NoSchedule
+      requirements:
+        - key: karpenter.sh/capacity-type
+          operator: In
+          values: ["on-demand"]
+        - key: karpenter.k8s.aws/instance-family
+          operator: In
+          values: {{ .Values.gpuG.instanceFamilies | toJson }}
+  disruption:
+    consolidationPolicy: {{ .Values.consolidationPolicy }}
+    consolidateAfter: 1m
+{{- if .Values.gpuP.enabled }}
+---
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: gpu-p
+spec:
+  template:
+    metadata:
+      labels:
+        inference/accelerator: nvidia-p
+    spec:
+      nodeClassRef:
+        group: karpenter.k8s.aws
+        kind: EC2NodeClass
+        name: gpu-p
+      expireAfter: {{ .Values.expireAfter }}
+      taints:
+        # Shared GPU taint (keeps non-GPU pods off) + a DISTINCT high-tier taint so a
+        # pod reaches P only by tolerating BOTH — an under-specified GPU pod is repelled
+        # here and falls to gpu-g, so the expensive node is never grabbed/provisioned
+        # by accident. The taint key MUST differ from the label key
+        # (inference/accelerator): a key that is both a label and a taint breaks
+        # Karpenter's scheduling simulation ("label does not have known values",
+        # so the tier taint is inference/gpu-tier=high, not the label.
+        - key: nvidia.com/gpu
+          value: "present"
+          effect: NoSchedule
+        - key: inference/gpu-tier
+          value: "high"
+          effect: NoSchedule
+      requirements:
+        - key: karpenter.sh/capacity-type
+          operator: In
+          values: ["on-demand"]
+        - key: karpenter.k8s.aws/instance-family
+          operator: In
+          values: {{ .Values.gpuP.instanceFamilies | toJson }}
+  disruption:
+    consolidationPolicy: {{ .Values.consolidationPolicy }}
+    consolidateAfter: 1m
+{{- end }}

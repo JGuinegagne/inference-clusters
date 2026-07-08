@@ -48,6 +48,11 @@ e2e-container-name := "inference-e2e"
 e2e-image-tag := "latest"
 export E2E_IMAGE := "inference-e2e:latest"
 
+# helm is NOT in the vended pytest-jupyter-deploy image (which ships terraform/aws/kubectl/yq);
+# the serving e2e tests (test_vllm_serving etc.) shell out to `helm install`, so e2e-up installs
+# a pinned binary into the running container. Bump here to move helm versions.
+e2e-helm-version := "v3.16.3"
+
 # Template under test (matches libs/<template>/tests/e2e)
 default-template := "inference-tf-aws-eks-karpenter"
 
@@ -94,9 +99,32 @@ e2e-up no_cache="false":
 
     mkdir -p ~/.kube  # must exist before compose up; Docker creates missing bind-mount sources as root
     {{container-tool}} compose --project-directory {{justfile_directory()}} $E2E_COMPOSE_FILES up -d e2e
+    just e2e-ensure-helm
     echo "E2E container started. Syncing latest code..."
     just e2e-sync
     echo "✓ E2E container ready"
+
+# Install helm into the running E2E container if absent. helm is NOT in the vended
+# pytest-jupyter-deploy image (which ships terraform/aws/kubectl/yq), but the serving e2e
+# tests (test_vllm_serving etc.) shell out to `helm install`. No-op once the image bakes
+# helm in (ANY version) — at which point this recipe and its callers can be dropped. Must
+# run after EVERY container (re)creation: `test-e2e` recreates from the image, discarding
+# anything installed into a prior running container.
+e2e-ensure-helm:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if {{container-tool}} exec {{e2e-container-name}} bash -c 'command -v helm >/dev/null 2>&1'; then
+        echo "helm already present in the E2E container (no-op)"
+        exit 0
+    fi
+    echo "Installing helm {{e2e-helm-version}} into the E2E container..."
+    {{container-tool}} exec --user root {{e2e-container-name}} bash -c '\
+        set -e; \
+        curl -fsSL "https://get.helm.sh/helm-{{e2e-helm-version}}-linux-amd64.tar.gz" \
+            | tar -xz -C /tmp linux-amd64/helm; \
+        install -m 0755 /tmp/linux-amd64/helm /usr/local/bin/helm; \
+        rm -rf /tmp/linux-amd64; \
+        helm version --short'
 
 # Stop E2E container
 e2e-down:
@@ -210,6 +238,10 @@ test-e2e project_dir="sandbox-e2e" test_filter="" options="" template=default-te
     mkdir -p ~/.kube
     {{container-tool}} compose --project-directory {{justfile_directory()}} $E2E_COMPOSE_FILES down
     {{container-tool}} compose --project-directory {{justfile_directory()}} $E2E_COMPOSE_FILES -f "$OVERRIDE_FILE" up -d --no-build
+
+    # The recreate above restored the container from the image, dropping any helm installed
+    # into the previous running container — reinstall it (no-op once the image bakes it in).
+    just e2e-ensure-helm
 
     if [ "$SKIP_SYNC" != "true" ]; then
         echo "Re-syncing project files after mount..."

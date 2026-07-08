@@ -1,0 +1,9 @@
+# Non-conforming: declares an images: block (so onboard rehosts something) BUT a
+# template below ignores it and hardcodes a raw upstream ref — the exact mistake the
+# backstop exists to catch.
+images:
+  server:
+    registry: public.ecr.aws
+    repository: docker/library/busybox
+    tag: "1.36"
+replicas: 1

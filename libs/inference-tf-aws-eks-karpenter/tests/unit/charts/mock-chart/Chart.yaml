@@ -1,0 +1,10 @@
+apiVersion: v2
+name: mock-chart
+version: 0.1.0
+description: >-
+  Minimal conforming consumer chart fixture for exercising the chart-onboard job.
+  Follows the mandated images:/optional weights: value convention and
+  renders every image through the chart.image helper — the shape onboard rehosts
+  and the backstop asserts. Uses a tiny real public image so skopeo has something
+  fast+real to digest-vendor.
+type: application

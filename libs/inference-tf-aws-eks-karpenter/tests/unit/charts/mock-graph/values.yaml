@@ -1,0 +1,11 @@
+# Path-B onboard sidecar: the field-paths in graph.yaml the onboard job must
+# rehost. Each is a bare field-path (dotted, with [N] list indices) into the RGD whose
+# value is a LITERAL ref — onboard reads it, vendors it, and writes our ref back into
+# the emitted graph-air-gapped.yaml. Every OTHER value in graph.yaml is ignored.
+images:
+  - spec.resources[0].template.spec.template.spec.containers[0].image
+weights:
+  # `field-path=name`: name is the models/<name> subdir the workload reads (must match
+  # the graph's read path — onboard does not rewrite that). Omit `=name` to fall back
+  # to the source's last path segment.
+  - spec.resources[0].template.spec.template.spec.containers[0].env[0].value=mock-tiny

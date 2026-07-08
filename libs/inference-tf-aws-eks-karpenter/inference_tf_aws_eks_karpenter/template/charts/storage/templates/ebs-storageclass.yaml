@@ -1,0 +1,18 @@
+{{- /*
+EBS gp3 StorageClass — the cluster default (RWO), for pod scratch/logs/ephemeral
+PVCs. WaitForFirstConsumer so the volume is created in the AZ where the pod lands
+(Karpenter may place the pod in either AZ). Encrypted at rest.
+*/ -}}
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: ebs-gp3
+  annotations:
+    storageclass.kubernetes.io/is-default-class: {{ .Values.ebs.default | quote }}
+provisioner: ebs.csi.aws.com
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true
+reclaimPolicy: Delete
+parameters:
+  type: gp3
+  encrypted: "true"

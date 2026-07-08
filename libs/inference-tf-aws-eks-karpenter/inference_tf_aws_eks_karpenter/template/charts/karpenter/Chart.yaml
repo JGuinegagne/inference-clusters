@@ -1,0 +1,7 @@
+apiVersion: v2
+name: karpenter-nodepools
+# SemVer spelling of the template version 0.1.0rc1 (Helm requires SemVer; PEP 440
+# 'rc1' == SemVer '-rc1'). Kept in sync with the template version.
+version: 0.1.0-rc1
+description: First-party Karpenter NodePool + EC2NodeClass CRs (cpu, gpu-g) for the inference cluster
+type: application

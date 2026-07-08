@@ -30,6 +30,17 @@ The template deploys:
 
 {{ history-logs-instructions }}
 
+### Check the deployment health
+
+{{ health-check-instructions }}
+
+For this template the **cluster**, **components**, and **images** layers apply. The
+**load-balancer** and **connection** layers report `skipped` by design: this is an
+endpoints-only VPC with no public ingress or load balancer, so there is no external URL
+to health-check. The components layer covers the Deployment-type platform operators
+(Karpenter, KEDA, the Prometheus operator, Grafana, kube-state-metrics, KRO); the images
+layer confirms each vendored platform image landed in ECR (the air-gapped failure mode).
+
 ### Delete all the resources
 
 {{ down-instructions }}
@@ -47,5 +58,169 @@ All variables MUST be defined in `./engine/variables.tf` without default values;
 
 ### Presets
 `./engine/presets` correspond to optional sets of default variables. Users SHOULD NOT modify these files.
+
+## Deploying an inference workload (consumer onboarding)
+
+This cluster runs on an **endpoints-only VPC**: nodes reach only this account's regional
+ECR and S3 — no public internet. So a workload's images and weights must be **rehosted
+into our ECR/S3 before you deploy it**. The `onboarder` CodeBuild job does this. It
+auto-detects two input formats and emits the matching air-gapped artifact:
+
+| Path | Input (a tarball) | Deploy with | Emits | Drift reconciliation |
+|---|---|---|---|---|
+| **A — Helm chart** | `Chart.yaml` + `values.yaml` (`images:`/`weights:` blocks) | `helm install -f overrides.yaml` | `overrides.yaml` | none (Helm renders only) |
+| **B — KRO graph** | `graph.yaml` (RGD) + `values.yaml` (field-path lists) | `kubectl apply` the graph + a CR | `graph-air-gapped.yaml` | **continuous** (KRO reconciles children) |
+
+### Path A — Helm chart
+
+**A1. Make your chart conform.** Every image is a structured object under `images:` and
+every template renders it through the shared `chart.image` helper — never hardcode a
+registry ref (a hardcoded ref has no pull path here and the onboard job rejects it):
+
+```yaml
+# values.yaml
+images:                              # MANDATED — every image an addressable object
+  server:  { registry: "", repository: vllm/vllm-openai, tag: v0.6.3 }
+  sidecar: { registry: "", repository: my/sidecar,        tag: "1.2" }
+weights:                             # OPTIONAL — declare to have onboard rehost into our S3
+  model:   { source: "hf://google/gemma-2-9b", name: gemma-2-9b }   # or source: s3://…
+```
+
+```gotemplate
+{{/* templates/_helpers.tpl — copy this helper verbatim */}}
+{{- define "chart.image" -}}
+{{- $sep := ":" -}}{{- if hasPrefix "@" .tag -}}{{- $sep = "" -}}{{- end -}}
+{{- if .registry -}}{{ .registry }}/{{ .repository }}{{ $sep }}{{ .tag }}
+{{- else -}}{{ .repository }}{{ $sep }}{{ .tag }}{{- end -}}
+{{- end -}}
+```
+
+```gotemplate
+# in a Deployment template — render via the helper, never a literal ref
+image: {{ include "chart.image" .Values.images.server }}
+```
+
+**A2. Onboard the chart.** Package it, upload to the input prefix, and start the job:
+
+```bash
+helm package ./my-chart -d /tmp                 # -> /tmp/my-chart-<ver>.tgz
+IN=$(jd show --output onboarder_input_s3_uri --text)
+OUT=$(jd show --output onboarder_output_s3_uri --text)
+PROJECT=$(jd show --output onboarder_codebuild_project --text)
+aws s3 cp /tmp/my-chart-*.tgz "$IN/my-chart.tgz"
+aws codebuild start-build --project-name "$PROJECT" \
+  --environment-variables-override "name=CHART_REF,value=$IN/my-chart.tgz,type=PLAINTEXT"
+# when it succeeds, fetch the emitted overrides (rehost/out/<chart-name>/):
+aws s3 cp "$OUT/my-chart/overrides.yaml" ./overrides.yaml
+```
+
+The job digest-vendors each `images:` entry to `<ecr>/workload/<repo>@<digest>`,
+(optionally) ingests `weights:` into `models/<name>`, and **backstops** by rendering the
+chart with the overrides and asserting every image resolves to our ECR — a convention
+violation fails the build, not a hung pod.
+
+**A3. Install with the overrides:**
+
+```bash
+jd cluster login
+helm install my-gemma ./my-chart -f overrides.yaml --set replicas=4
+```
+
+### Path B — KRO graph (recommended for reconciled workloads)
+
+Ship a **`graph.yaml`** (a valid KRO `ResourceGraphDefinition` with the **literal
+upstream refs baked in**, so it also applies as-is on a non-air-gapped cluster) plus a
+sidecar **`values.yaml`** that lists the *field-paths* onboard must rehost. Onboard reads
+the ref at each path, vendors it, and writes a **rewritten copy** (`graph-air-gapped.yaml`)
+— `graph.yaml` itself is never mutated.
+
+**B1. Author the graph + the field-path sidecar.** The sidecar is two lists of bare
+dotted/`[N]`-indexed paths into `graph.yaml`; the value at each path must be a *literal*
+ref (not a `${...}` CEL expression). An `images:` path's value is a full image ref; a
+`weights:` path's value is a source URI (`s3://…`/`hf://…`).
+
+```yaml
+# values.yaml (onboard sidecar — every OTHER value in graph.yaml is ignored)
+images:
+  - spec.resources[0].template.spec.template.spec.containers[0].image
+weights:
+  - spec.resources[0].template.spec.template.spec.containers[0].env[0].value
+```
+
+```yaml
+# graph.yaml (excerpt) — literal refs at the listed paths; works non-air-gapped too
+image: vllm/vllm-openai:v0.6.6                       # <- rehosted to <ecr>/workload/…@<digest>
+env:
+  - name: WEIGHTS_SOURCE
+    value: s3://jumpstart-cache-prod-us-west-2/…/qwen2.5-7b   # <- rehosted to models/qwen2.5-7b
+```
+
+**B2. Onboard the graph.** Tar the dir (single top-level folder) and start the job — same
+project, auto-detected as Path B:
+
+```bash
+tar -czf /tmp/my-graph.tgz -C ./ my-graph          # my-graph/{graph.yaml,values.yaml}
+IN=$(jd show --output onboarder_input_s3_uri --text)
+OUT=$(jd show --output onboarder_output_s3_uri --text)
+PROJECT=$(jd show --output onboarder_codebuild_project --text)
+aws s3 cp /tmp/my-graph.tgz "$IN/my-graph.tgz"
+aws codebuild start-build --project-name "$PROJECT" \
+  --environment-variables-override "name=CHART_REF,value=$IN/my-graph.tgz,type=PLAINTEXT"
+# emitted under rehost/out/<graph metadata.name>/ :
+aws s3 cp "$OUT/<graph-name>/graph-air-gapped.yaml" ./graph-air-gapped.yaml
+```
+
+Onboard **backstops** each listed path field-by-field (every image-path now resolves to
+our ECR `@sha256:`, every weight-path to our S3) — cluster-independent, so a bad path or
+a non-literal ref fails the build.
+
+**B3. Apply the graph, then create CRs.** No Helm:
+
+```bash
+jd cluster login
+kubectl apply -f graph-air-gapped.yaml             # registers the RGD + its CRD
+kubectl apply -f my-cr.yaml                          # a ServableInference (etc.) instance
+```
+
+KRO's controller now reconciles the CR's children continuously.
+
+## GPU placement — choosing an accelerator tier
+
+Karpenter provisions GPU nodes on demand from two pools. A workload pod picks a tier by
+its `nodeSelector` + tolerations; per-GPU requests (`limits: nvidia.com/gpu: 1`) let
+several pods bin-pack onto one node.
+
+| Tier | NodeSelector | Tolerations the pod needs | Instances |
+|---|---|---|---|
+| **g** (default) | `inference/accelerator: nvidia-g` | `nvidia.com/gpu=present:NoSchedule` | g5/g6/g6e/g7 (A10G / L4 / L40S) |
+| **p** (high-end) | `inference/accelerator: nvidia-p` | `nvidia.com/gpu=present:NoSchedule` **and** `inference/gpu-tier=high:NoSchedule` | p4d/p5/p5en (A100 / H100 / H200) |
+
+```yaml
+# a g-tier pod (most inference)
+nodeSelector: { inference/accelerator: nvidia-g }
+tolerations:
+  - { key: nvidia.com/gpu, operator: Exists, effect: NoSchedule }
+```
+```yaml
+# a p-tier pod (large models / high throughput) — opts in on BOTH the label and the tier taint
+nodeSelector: { inference/accelerator: nvidia-p }
+tolerations:
+  - { key: nvidia.com/gpu, operator: Exists, effect: NoSchedule }
+  - { key: inference/gpu-tier, operator: Equal, value: high, effect: NoSchedule }
+```
+
+**Cost-safety:** the P pool carries an extra `inference/gpu-tier=high` taint, so a pod
+lands on (and provisions) an expensive P node ONLY when it explicitly opts in on both
+axes. A GPU pod that forgets the P selector falls to the cheaper g pool — a P node is
+never spun up by accident. The P pool is gated by `enable_gpu_p_nodepool` (default on;
+the pool definition is inert until a pod opts in).
+
+**Seams (not default):**
+- **ODCR** — P on-demand capacity is scarce (you may hit `InsufficientInstanceCapacity`).
+  Set `gpu_p_capacity_reservation_id` to pin the P pool to a Capacity Reservation.
+- **Shared GPU pool** — when P is reserved/always-on, backfilling its idle GPUs with
+  g-tier work is worthwhile (drop the tier taint so g-pods may land on P). NOT the
+  default: for elastic on-demand P, backfilling pins the node up and blocks
+  consolidation, usually raising cost.
 
 {{ generated-by-footer }}

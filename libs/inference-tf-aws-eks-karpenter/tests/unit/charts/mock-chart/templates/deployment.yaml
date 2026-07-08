@@ -1,0 +1,22 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-mock
+  labels:
+    app: {{ .Release.Name }}-mock
+spec:
+  replicas: {{ .Values.replicas }}
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}-mock
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}-mock
+    spec:
+      containers:
+        - name: server
+          # Rendered through the shared helper — this is the ref the onboard backstop
+          # asserts resolves to our ECR after the overrides.yaml rewrite.
+          image: {{ include "chart.image" .Values.images.server }}
+          command: ["sleep", "3600"]

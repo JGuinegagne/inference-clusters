@@ -5,8 +5,16 @@ that `jd init`/`jd config` produce a correctly wired project from the template.
 They run inside the pytest-jupyter-deploy E2E container.
 """
 
+import re
+
 from pytest_jupyter_deploy.deployment import EndToEndDeployment
 from pytest_jupyter_deploy.undeployed_project import undeployed_project
+
+# jd snippet placeholders are `{{ some-hyphenated-name }}` (e.g. {{ health-check-instructions }})
+# and must all be substituted at init. This must NOT match the helm `chart.image` helper the
+# template ships verbatim for consumers ({{- define ... }}, {{ .Values... }}) — those have
+# dots, quotes, or `-}}` trim markers, none of which fit the snippet-token shape.
+_JD_PLACEHOLDER_RE = re.compile(r"\{\{ [a-z][a-z0-9-]* \}\}")
 
 
 def test_project_scaffolds_from_template(e2e_deployment: EndToEndDeployment) -> None:
@@ -30,9 +38,10 @@ def test_agent_md_rendered_after_init(e2e_deployment: EndToEndDeployment) -> Non
 
         agent_content = agent_path.read_text()
         assert "Karpenter" in agent_content, "rendered AGENT.md should mention Karpenter"
-        assert "{{" not in agent_content and "}}" not in agent_content, (
-            "rendered AGENT.md should not contain template placeholders"
-        )
+        # No jd snippet placeholder may survive; the shipped helm `chart.image` helper ({{...}})
+        # is expected to remain (it's a code sample consumers copy), so match only jd tokens.
+        leftover = _JD_PLACEHOLDER_RE.findall(agent_content)
+        assert not leftover, f"rendered AGENT.md still has unsubstituted jd placeholders: {leftover}"
 
 
 def test_project_is_configurable(e2e_deployment: EndToEndDeployment) -> None:

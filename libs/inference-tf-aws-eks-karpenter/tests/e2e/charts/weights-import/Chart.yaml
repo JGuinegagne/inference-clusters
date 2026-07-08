@@ -1,0 +1,12 @@
+apiVersion: v2
+name: weights-import
+version: 0.1.0
+description: >-
+  Weights-ingest stress fixture for the onboarder: a conforming chart whose weights:
+  source is a very large SageMaker JumpStart model (NVIDIA Nemotron-3-Super-120B,
+  ~230 GiB across 75 objects — a mix of tiny configs and multi-GB shards). Exercises the
+  streaming S3 multipart copy at scale: no local disk, bounded memory, bounded open MPUs.
+  The e2e onboards it and asserts the weights land in our S3 — it does NOT serve the model
+  (a 120B needs P-class GPUs). The image is a throwaway (never pulled); it exists only so
+  the chart conforms and the Path-A backstop renders. A fixture, never shipped.
+type: application

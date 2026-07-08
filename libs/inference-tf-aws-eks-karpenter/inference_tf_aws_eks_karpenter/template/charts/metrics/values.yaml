@@ -1,0 +1,13 @@
+# Injected from Terraform (platform_prometheus.tf). Defaults are placeholders so
+# `helm template` renders standalone for linting.
+
+# -- Namespace Karpenter runs in (its /metrics service lives here).
+karpenterNamespace: kube-system
+
+# -- Label the kube-prometheus-stack Prometheus selects ServiceMonitors by. The
+#    stack's default release selector is `release: <prometheus release name>`.
+serviceMonitorLabel:
+  release: kube-prometheus-stack
+
+# -- Label the Grafana sidecar watches for dashboard ConfigMaps.
+grafanaDashboardLabel: grafana_dashboard

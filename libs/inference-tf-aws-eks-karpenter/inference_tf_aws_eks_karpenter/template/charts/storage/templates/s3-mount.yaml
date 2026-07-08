@@ -1,0 +1,46 @@
+{{- /*
+S3-mount (Mountpoint-for-S3) — mounts s3://<bucket>/<modelsPrefix> as a READ-ONLY
+POSIX path so engines that want a filesystem can read weights without FSx.
+
+Mountpoint-for-S3 CSI supports STATIC provisioning ONLY (no dynamic PVCs): we ship
+a PersistentVolume with a fixed volumeHandle + the matching PVC. `storageClassName`
+is "" on both so they bind to each other directly (no dynamic provisioner). The
+mount is read-only and scoped to the models/ prefix; writes go via the S3-direct
+path (node role → output/). Auth is the s3_csi_role via Pod Identity.
+*/ -}}
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: {{ .Values.s3.claimName }}
+spec:
+  capacity:
+    # Ignored by Mountpoint (S3 has no fixed capacity) but required by the PV schema.
+    storage: {{ .Values.s3.capacity }}
+  accessModes:
+    - ReadOnlyMany
+  storageClassName: ""
+  persistentVolumeReclaimPolicy: Retain
+  mountOptions:
+    - read-only
+    - prefix {{ .Values.s3.modelsPrefix }}/
+  csi:
+    driver: s3.csi.aws.com
+    # volumeHandle MUST be unique across the cluster; it is NOT the bucket name.
+    volumeHandle: {{ .Values.s3.claimName }}-{{ .Values.s3.bucketName }}
+    volumeAttributes:
+      bucketName: {{ .Values.s3.bucketName | quote }}
+      region: {{ .Values.s3.region | quote }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Values.s3.claimName }}
+  namespace: {{ .Values.s3.claimNamespace }}
+spec:
+  accessModes:
+    - ReadOnlyMany
+  storageClassName: ""
+  resources:
+    requests:
+      storage: {{ .Values.s3.capacity }}
+  volumeName: {{ .Values.s3.claimName }}

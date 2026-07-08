@@ -1,0 +1,29 @@
+# KEDA ScaledObject for the online scale-from-zero E2E.
+#
+# Scales the vLLM serving Deployment 0->1 on the ALWAYS-ON router's in-flight gauge
+# (router_inflight_requests) — a series that exists at zero serving replicas because the
+# router pod is always up. A held request pushes the gauge to >=1 -> KEDA activates and
+# scales vLLM up -> Pending -> bin-packs onto the warm g node; the request completes ->
+# gauge drops to 0 -> KEDA scales vLLM back to 0.
+#
+# threshold=1 + activationThreshold=0: 0 in-flight -> scale to 0; >=1 -> activate + up.
+# ${target} is the vLLM Deployment name (substituted at apply time).
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: ${target}
+  namespace: default
+spec:
+  scaleTargetRef:
+    name: ${target}
+  minReplicaCount: 0
+  maxReplicaCount: 1
+  pollingInterval: 15
+  cooldownPeriod: 30
+  triggers:
+    - type: prometheus
+      metadata:
+        serverAddress: http://kube-prometheus-stack-prometheus.monitoring.svc:9090
+        query: 'max(router_inflight_requests) or vector(0)'
+        threshold: "1"
+        activationThreshold: "0"

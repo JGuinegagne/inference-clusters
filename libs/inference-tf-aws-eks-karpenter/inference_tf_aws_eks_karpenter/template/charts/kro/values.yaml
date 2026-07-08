@@ -1,0 +1,10 @@
+# Injected from Terraform (platform_kro.tf). Defaults are placeholders so
+# `helm template` renders standalone for linting.
+
+# -- Label value on GPU nodes (inference/accelerator), so a starter's Deployment
+#    lands on the Karpenter GPU NodePool.
+karpenterGpuNodeSelector: nvidia-g
+
+# -- The label the kube-prometheus-stack Prometheus selects ServiceMonitors by, so
+#    the starter's ServiceMonitor is scraped (release: <prometheus release name>).
+serviceMonitorLabel: kube-prometheus-stack

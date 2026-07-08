@@ -1,0 +1,22 @@
+# Weights-ingest stress fixture. The onboarder vendors the (throwaway) image and, the
+# point of this fixture, STREAMS the large weights prefix into our S3.
+
+# images: — MANDATED even though we never serve. A trivial Docker Hub image (skopeo pulls
+# it from docker.io in CodeBuild, which has public egress) so the chart conforms and the
+# Path-A `helm template` backstop resolves every ref to our ECR. registry="" => docker.io,
+# so repository must be the Docker Hub path (library/busybox), NOT an ecr-public path.
+images:
+  server:
+    registry: ""
+    repository: library/busybox
+    tag: "1.36"
+
+# weights: — the stress target. NVIDIA Nemotron-3-Super-120B-A12B (BF16) from the
+# SageMaker JumpStart public cache: ~230 GiB over 75 objects (tiny configs + multi-GB
+# safetensors shards). Same-region s3:// source, so the onboarder streams it into
+# s3://<bucket>/models/nemotron-3-super-120b — no HF token, no public egress, no local
+# disk (far exceeds the CodeBuild EBS). Exercises single-shot + multipart copy paths.
+weights:
+  model:
+    source: "s3://${JUMPSTART_PUBLIC_BUCKET_NAME}/huggingface-llm/huggingface-llm-nvidia-nemotron-3-super-120b-a12b-bf16/artifacts/inference-prepack/v1.0.0"
+    name: nemotron-3-super-120b
