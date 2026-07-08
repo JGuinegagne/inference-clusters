@@ -1,0 +1,34 @@
+# Realistic consumer inference chart values.
+
+# images: — MANDATED. The vLLM OpenAI-compatible server. chart-onboard digest-vendors
+# it to <ecr>/workload/vllm/vllm-openai@<digest> and rewrites this block.
+images:
+  server:
+    registry: ""                      # Docker Hub default
+    repository: vllm/vllm-openai
+    tag: v0.6.6
+
+# weights: — OPTIONAL. Qwen2.5-7B-Instruct from the SageMaker JumpStart public cache
+# (a complete, directly-servable HF model dir: 4 safetensors shards ~15GB + tokenizer
+# + config). It is a SAME-REGION s3:// source, so chart-onboard s5cmd-ingests it into
+# s3://<bucket>/models/qwen2.5-7b — no HF token, no public egress. (SageMaker
+# JumpStart mirrors the ungated Qwen2.5-7B-Instruct; the model is Apache-2.0.)
+weights:
+  model:
+    source: "s3://${JUMPSTART_PUBLIC_BUCKET_NAME}/huggingface-llm/huggingface-llm-qwen2-5-7b-instruct/artifacts/inference-prepack/v1.0.0"
+    name: qwen2.5-7b
+
+# --- serving config (non-artifact knobs) ---
+# The read-only S3-mount PVC the platform ships (charts/storage); weights land
+# under <mount>/<weightsSubPath>.
+modelStorePvc: model-store
+weightsSubPath: qwen2.5-7b
+
+# vLLM tuning — conservative for a single L4 (g6.xlarge, 24GB VRAM): leave headroom so
+# first-boot doesn't OOM the KV cache, cap context so warmup is bounded.
+gpuMemoryUtilization: "0.90"
+maxModelLen: "8192"
+servedModelName: qwen2.5-7b
+
+port: 8000
+replicas: 1

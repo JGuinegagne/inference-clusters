@@ -1,0 +1,102 @@
+# Path-B onboard fixture: a bare KRO ResourceGraphDefinition with LITERAL
+# upstream refs — no Helm. It applies as-is on a non-air-gapped cluster; the onboard job
+# rewrites a copy (graph-air-gapped.yaml) with our ECR/S3 refs for the endpoints-only VPC.
+#
+# It expands a ServableGraphInference CR into a vLLM Deployment (GPU placement + the
+# S3-weights PVC mount + serving args) and a Service. KRO reconciles those children
+# continuously. The rehostable refs live at bare field-paths listed in values.yaml:
+#   - the container image (a literal upstream ref)
+#   - WEIGHTS_SOURCE env (a literal s3:// source URI) — the CEL composes it into --model.
+apiVersion: kro.run/v1alpha1
+kind: ResourceGraphDefinition
+metadata:
+  name: servable-graph-inference
+spec:
+  schema:
+    apiVersion: v1alpha1
+    kind: ServableGraphInference
+    spec:
+      servedModelName: string | default="qwen2.5-7b"
+      port: integer | default=8000
+      gpuMemoryUtilization: string | default="0.90"
+      maxModelLen: string | default="8192"
+    status:
+      availableReplicas: ${deployment.status.availableReplicas}
+  resources:
+    - id: deployment
+      template:
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: ${schema.metadata.name}
+        spec:
+          replicas: 1
+          selector:
+            matchLabels:
+              app: ${schema.metadata.name}
+          template:
+            metadata:
+              labels:
+                app: ${schema.metadata.name}
+            spec:
+              nodeSelector:
+                inference/accelerator: nvidia-g
+              tolerations:
+                - key: nvidia.com/gpu
+                  operator: Exists
+                  effect: NoSchedule
+              volumes:
+                - name: model-store
+                  persistentVolumeClaim:
+                    claimName: model-store
+                - name: shm
+                  emptyDir:
+                    medium: Memory
+                    sizeLimit: 4Gi
+              containers:
+                - name: server
+                  # LITERAL upstream ref — onboard rewrites to <ecr>/workload/…@<digest>.
+                  image: vllm/vllm-openai:v0.6.6
+                  env:
+                    # LITERAL weight source URI — onboard rewrites to our models/<name>
+                    # S3 URI. --model below reads it; weights mount read-only at /models.
+                    - name: WEIGHTS_SOURCE
+                      # yamllint disable-line rule:line-length
+                      value: "s3://${JUMPSTART_PUBLIC_BUCKET_NAME}/huggingface-llm/huggingface-llm-qwen2-5-7b-instruct/artifacts/inference-prepack/v1.0.0"
+                  args:
+                    - "--model=/models/qwen2.5-7b"
+                    - "--served-model-name=${schema.spec.servedModelName}"
+                    - "--gpu-memory-utilization=${schema.spec.gpuMemoryUtilization}"
+                    - "--max-model-len=${schema.spec.maxModelLen}"
+                    - "--port=${string(schema.spec.port)}"
+                  ports:
+                    - name: http
+                      containerPort: ${schema.spec.port}
+                  resources:
+                    limits:
+                      nvidia.com/gpu: 1
+                  volumeMounts:
+                    - name: model-store
+                      mountPath: /models
+                      readOnly: true
+                    - name: shm
+                      mountPath: /dev/shm
+                  startupProbe:
+                    httpGet:
+                      path: /health
+                      port: http
+                    periodSeconds: 15
+                    failureThreshold: 60
+    - id: service
+      template:
+        apiVersion: v1
+        kind: Service
+        metadata:
+          name: ${schema.metadata.name}
+        spec:
+          selector:
+            app: ${schema.metadata.name}
+          ports:
+            - name: http
+              port: ${schema.spec.port}
+              targetPort: ${schema.spec.port}

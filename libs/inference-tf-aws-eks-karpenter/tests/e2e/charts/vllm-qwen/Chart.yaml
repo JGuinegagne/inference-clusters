@@ -1,0 +1,10 @@
+apiVersion: v2
+name: vllm-qwen
+version: 0.1.0
+description: >-
+  Realistic conforming consumer inference chart: serves Qwen2.5-7B-Instruct on a single
+  GPU via vLLM (OpenAI-compatible API). Exercises the full stack — chart-onboard
+  digest-vendors the vLLM image + rehosts the model weights to our S3; the pod pends,
+  Karpenter provisions a GPU node, weights mount read-only from S3, vLLM serves. Used
+  by the gated serving E2E; a fixture, never shipped in the template.
+type: application

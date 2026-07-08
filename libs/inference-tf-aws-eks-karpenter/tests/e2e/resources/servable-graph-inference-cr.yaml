@@ -1,0 +1,11 @@
+# A ServableGraphInference CR for the Path-B (KRO graph, no Helm) serving E2E.
+# KRO expands it (via the onboarded graph-air-gapped RGD) into a vLLM Deployment +
+# Service. The image + weights are baked into the RGD by chart-onboard, so the CR only
+# carries per-instance serving config.
+apiVersion: kro.run/v1alpha1
+kind: ServableGraphInference
+metadata:
+  name: qwen-graph
+  namespace: default
+spec:
+  servedModelName: qwen2.5-7b
