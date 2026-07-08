@@ -17,6 +17,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import yaml
 from botocore.exceptions import ClientError
@@ -134,6 +135,19 @@ class TestPureCore(unittest.TestCase):
         self.assertEqual(co.part_ranges(0), [])
         with tempfile.TemporaryDirectory() as td, self.assertRaises(SystemExit):
             co.detect_mode(Path(td))
+
+    def test_ecr_tag_args(self) -> None:
+        # JSON map -> `--tags Key=..,Value=..` shorthand items (one per tag).
+        with patch.dict("os.environ", {"RESOURCE_TAGS_JSON": '{"DeploymentId": "abc123", "Source": "jupyter-deploy"}'}):
+            args = co.Runner._ecr_tag_args()
+        self.assertEqual(args[0], "--tags")
+        self.assertIn("Key=DeploymentId,Value=abc123", args)
+        self.assertIn("Key=Source,Value=jupyter-deploy", args)
+        # Unset or empty -> no --tags flag at all (create-repository stays valid).
+        with patch.dict("os.environ", {"RESOURCE_TAGS_JSON": "{}"}):
+            self.assertEqual(co.Runner._ecr_tag_args(), [])
+        with patch.dict("os.environ", {}, clear=True):
+            self.assertEqual(co.Runner._ecr_tag_args(), [])
 
 
 @unittest.skipIf(_HELM is None, "helm not on PATH — required for the Path-A onboard backstop")

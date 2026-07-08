@@ -33,6 +33,12 @@ variable "extra_policy_json" {
   default     = ""
 }
 
+variable "attach_extra_policy" {
+  type        = bool
+  description = "Whether to attach extra_policy_json. Must be a plan-time-known flag: gating the policy resource on `extra_policy_json != \"\"` fails when the JSON references an apply-time-unknown value (e.g. a bucket_prefix ARN), so the caller sets this explicitly."
+  default     = false
+}
+
 variable "managed_policy_arns" {
   type        = list(string)
   description = "AWS-managed policy ARNs to attach to the job role — e.g. AmazonS3ReadOnlyAccess so the onboarder can read any weight-source bucket. Empty = none."

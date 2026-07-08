@@ -22,7 +22,10 @@
 locals {
   # Workload images vendored by onboarder live under this ECR prefix; repos are
   # created on-demand by the job (like pull-through repos, they are NOT in TF state).
-  workload_repo_prefix = "workload"
+  # CLUSTER-SCOPED via resource_name_prefix (embeds random_id.postfix), mirroring the
+  # vendored/* repos in images.tf: two deployments in one account/region must not share a
+  # workload repo (the coexistence rule), and it keeps offboard/cleanup scoped to one cluster.
+  workload_repo_prefix = "${local.resource_name_prefix}/workload"
   workload_repo_arn    = "arn:${data.aws_partition.current.partition}:ecr:${data.aws_region.current.id}:${data.aws_caller_identity.current.account_id}:repository/${local.workload_repo_prefix}/*"
 
   models_s3_uri     = "s3://${module.model_store.bucket_name}/${local.model_store_models_prefix}"
@@ -77,6 +80,7 @@ module "onboarder" {
   compute_type        = "BUILD_GENERAL1_LARGE"
   ecr_repository_arns = [local.workload_repo_arn]
   extra_policy_json   = data.aws_iam_policy_document.onboarder_extra.json
+  attach_extra_policy = true
   # Read any weight-source bucket (public JumpStart cache, etc.) via the AWS-managed policy —
   # replaces the per-bucket onboard_weight_source_buckets allowlist.
   managed_policy_arns = ["arn:${data.aws_partition.current.partition}:iam::aws:policy/AmazonS3ReadOnlyAccess"]
@@ -88,6 +92,10 @@ module "onboarder" {
     MODELS_S3_URI   = local.models_s3_uri
     REHOST_IN       = local.rehost_in_s3_uri
     REHOST_OUT      = local.rehost_out_s3_uri
+    # Tags applied to every workload/* ECR repo the job creates (same tag set as all other
+    # deployment resources) — so the repos are attributable + reapable by DeploymentId.
+    # JSON-encoded map; onboarder.py decodes it into `aws ecr create-repository --tags`.
+    RESOURCE_TAGS_JSON = jsonencode(local.combined_tags)
     # Overridden per start-build with the artifact to onboard — a Helm chart OR a KRO
     # graph, as an OCI ref, repo URL, or the tarball key uploaded to rehost/in. The
     # format is auto-detected from the unpacked dir; default keeps the project valid

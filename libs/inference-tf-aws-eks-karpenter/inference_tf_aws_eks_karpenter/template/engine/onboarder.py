@@ -37,10 +37,13 @@ embeddable file.
 Env (all required unless noted):
   CHART_DIR         local path to the unpacked artifact (chart or graph dir)
   ECR_REGISTRY      <acct>.dkr.ecr.<region>.amazonaws.com
-  WORKLOAD_PREFIX   ECR repo prefix for vendored workload images (default "workload")
+  WORKLOAD_PREFIX   ECR repo prefix for vendored workload images (cluster-scoped, e.g.
+                    "<cluster>/workload"; default "workload")
   MODELS_S3_URI     s3://<bucket>/models  (weights land under here as <name>/)
   OUT_DIR           where the emitted artifact + result manifest are written
                     (default: $CHART_DIR/..)
+  RESOURCE_TAGS_JSON  JSON map of tags applied to any workload/* ECR repo the job creates
+                    (attribution + DeploymentId reaping); optional, default no tags
   SKOPEO_EXTRA      extra skopeo args (tests set --dest-tls-verify=false etc.); optional
   DRY_RUN_COPY      "true" => skip the actual skopeo/s5cmd/ecr writes, still resolve
                     digests via `skopeo inspect` and emit the artifact; optional
@@ -49,6 +52,7 @@ Env (all required unless noted):
 from __future__ import annotations
 
 import contextlib
+import json
 import os
 import re
 import subprocess
@@ -277,6 +281,11 @@ class Runner:
         Describe first; create ONLY when it genuinely doesn't exist. This avoids
         swallowing real errors (throttling, access-denied) the way an unconditional
         create + check=False would — only RepositoryNotFoundException means "create it".
+
+        A created repo is tagged with the deployment's resource tags (RESOURCE_TAGS_JSON) so
+        it is attributable and reapable by DeploymentId like every other cluster resource —
+        these workload/* repos are created imperatively (not in TF state), so the tags are
+        the only handle a cleanup/offboard has on them.
         """
         if self.dry_run:
             return
@@ -292,13 +301,24 @@ class Runner:
             # Any other failure (throttle, AccessDenied, ...) is real — surface it.
             raise subprocess.CalledProcessError(describe.returncode, describe.args, describe.stdout, describe.stderr)
         create = subprocess.run(
-            ["aws", "ecr", "create-repository", "--repository-name", repo, "--region", region],
+            ["aws", "ecr", "create-repository", "--repository-name", repo, "--region", region, *self._ecr_tag_args()],
             capture_output=True,
             text=True,
         )
         # Tolerate only the describe->create race (a concurrent build won); anything else is real.
         if create.returncode != 0 and "RepositoryAlreadyExistsException" not in create.stderr:
             raise subprocess.CalledProcessError(create.returncode, create.args, create.stdout, create.stderr)
+
+    @staticmethod
+    def _ecr_tag_args() -> list[str]:
+        """Build `--tags Key=..,Value=..` args from RESOURCE_TAGS_JSON, or [] if unset/empty.
+
+        The env var is the JSON-encoded deployment tag map (see onboarder.tf); ECR's
+        create-repository --tags takes shorthand `Key=<k>,Value=<v>` items."""
+        tags = json.loads(os.environ.get("RESOURCE_TAGS_JSON") or "{}")
+        if not tags:
+            return []
+        return ["--tags", *[f"Key={k},Value={v}" for k, v in tags.items()]]
 
     def copy_image(self, src_ref: str, dst_digest_ref: str, dst_tag_ref: str) -> None:
         """Copy the full (multi-arch) manifest by digest; fall back to the tag ref."""

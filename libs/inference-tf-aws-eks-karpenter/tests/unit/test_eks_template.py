@@ -763,6 +763,28 @@ def test_onboarder_iam_scopes_workload_ecr_and_bucket() -> None:
     assert 'variable "onboard_weight_source_buckets"' not in var_content, "the per-bucket allowlist var must be removed"
 
 
+def test_onboarder_workload_repos_are_cluster_scoped_and_tagged() -> None:
+    """workload/* ECR repos are created imperatively (not in TF state), so they MUST be
+    cluster-scoped (embed resource_name_prefix) to satisfy the two-deployments-coexist rule,
+    and MUST carry the deployment tags so they are attributable + reapable by DeploymentId."""
+    content = (ENGINE / "onboarder.tf").read_text()
+    # Prefix embeds resource_name_prefix (like vendored/* in images.tf), not a bare "workload".
+    assert 'workload_repo_prefix = "${local.resource_name_prefix}/workload"' in content, (
+        "workload repo prefix must be cluster-scoped via resource_name_prefix"
+    )
+    # Tags are threaded to the job so ensure_repo can tag created repos.
+    assert "RESOURCE_TAGS_JSON = jsonencode(local.combined_tags)" in content, (
+        "onboarder must pass the deployment tags to the job for repo tagging"
+    )
+    doc = _extract_data_block(content, "aws_iam_policy_document", "onboarder_extra")
+    assert "ecr:TagResource" in doc, "onboarder must be allowed to tag the repos it creates"
+    # onboarder.py must consume the tags into create-repository --tags.
+    onboarder_py = (ENGINE / "onboarder.py").read_text()
+    assert "RESOURCE_TAGS_JSON" in onboarder_py and "--tags" in onboarder_py, (
+        "onboarder.py must tag created repos from RESOURCE_TAGS_JSON"
+    )
+
+
 def test_onboarder_buildspec_runs_the_script_and_publishes_output() -> None:
     """The buildspec must decode+run engine/onboarder.py and publish the emitted artifact."""
     content = (ENGINE / "onboarder.tf").read_text()

@@ -55,9 +55,12 @@ resource "aws_iam_role_policy" "this" {
   policy = data.aws_iam_policy_document.permissions.json
 }
 
-# Optional extra grant (e.g. the onboarder S3 weights ingest read/write).
+# Optional extra grant (e.g. the onboarder S3 weights ingest read/write). Gated on the
+# plan-time-known attach_extra_policy flag, NOT on the JSON content: the onboarder's policy
+# references the model-store bucket ARN (bucket_prefix => unknown until apply), so
+# `extra_policy_json == ""` would be an unknown count and fail `terraform plan`.
 resource "aws_iam_role_policy" "extra" {
-  count  = var.extra_policy_json == "" ? 0 : 1
+  count  = var.attach_extra_policy ? 1 : 0
   name   = "${var.project_name}-extra"
   role   = aws_iam_role.this.id
   policy = var.extra_policy_json

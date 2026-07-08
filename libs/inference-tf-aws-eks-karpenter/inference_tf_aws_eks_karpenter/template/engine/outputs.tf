@@ -122,6 +122,11 @@ output "ecr_registry" {
   value       = local.ecr_registry
 }
 
+output "workload_repo_prefix" {
+  description = "Cluster-scoped ECR prefix the onboarder vendors consumer workload images under (e.g. <cluster>/workload)."
+  value       = local.workload_repo_prefix
+}
+
 output "onboarder_codebuild_project" {
   description = "Name of the onboarder CodeBuild project to imports model weights and component images."
   value       = module.onboarder.project_name
