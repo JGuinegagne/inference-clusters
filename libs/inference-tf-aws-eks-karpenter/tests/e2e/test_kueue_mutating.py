@@ -77,7 +77,7 @@ spec:
 """
 
 
-@pytest.mark.mutating_case
+@pytest.mark.mutating
 def test_enable_kueue_lws_then_gang_schedule(e2e_deployment: EndToEndDeployment) -> None:
     """Enable Kueue+LWS on base cluster via flags, then validate gang scheduling."""
     # Phase 1: Mutate the cluster — add Kueue + LWS operators

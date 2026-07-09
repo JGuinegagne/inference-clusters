@@ -1,7 +1,7 @@
 schema_version: 2
 # This template declares no required variables; all values come from presets
 # (engine/presets/defaults-all.tfvars). Override here for E2E if needed.
+# Multinode operators (Kueue/LWS) are NOT enabled here — tests that need them
+# use update_override_value to add them on top of the base cluster.
 required: {}
-overrides:
-  enable_lws: true
-  enable_kueue: true
+overrides: {}

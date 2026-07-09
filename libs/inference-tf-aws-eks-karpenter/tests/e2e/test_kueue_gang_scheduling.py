@@ -81,7 +81,11 @@ spec:
 @pytest.mark.full_deployment
 def test_kueue_gang_schedules_lws_group(e2e_deployment: EndToEndDeployment) -> None:
     """Kueue admits a 2-pod LWS atomically; Karpenter provisions nodes; both pods Ready."""
+    # Enable multinode operators on the base cluster
     e2e_deployment.ensure_deployed()
+    e2e_deployment.update_override_value("enable_lws", True)
+    e2e_deployment.update_override_value("enable_kueue", True)
+    e2e_deployment.ensure_deployed_with([], timeout_seconds=900)
     e2e_deployment.cli.run_command(["jupyter-deploy", "cluster", "login"])
     image = h.client_image(e2e_deployment)
 
