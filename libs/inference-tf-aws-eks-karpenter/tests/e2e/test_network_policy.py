@@ -22,7 +22,7 @@ import time
 
 import pytest
 from pytest_jupyter_deploy.deployment import EndToEndDeployment
-from pytest_jupyter_deploy.kubernetes.namespace import temporary_namespace
+from pytest_jupyter_deploy.kubernetes.namespace import delete_namespace, temporary_namespace
 
 from tests.e2e import _serving_helpers as h
 
@@ -98,16 +98,21 @@ def _probe_target(image: str, *, labeled: bool) -> bool:
 
 
 @pytest.mark.full_deployment
-def test_network_policy_is_enforced(e2e_deployment: EndToEndDeployment) -> None:
+def test_network_policy_is_enforced(e2e_deployment: EndToEndDeployment, kubernetes_cluster_login: None) -> None:
     """A default-deny-with-one-allow policy is actually enforced by the VPC CNI.
 
     The deny assertion is the real point: it fails (source reaches the target) if the
     vpc-cni addon were missing enableNetworkPolicy=true. The allow assertion is the
     positive control that pins the deny to the policy, not to an unreachable target.
+
+    kubernetes_cluster_login (plugin fixture) does `jd cluster login` once per session.
     """
-    e2e_deployment.ensure_deployed()
-    e2e_deployment.cli.run_command(["jupyter-deploy", "cluster", "login"])
     image = h.client_image(e2e_deployment)
+
+    # temporary_namespace deletes with --wait=false, so a prior run's namespace may still
+    # be Terminating; delete-and-wait first so the create below never hits AlreadyExists.
+    delete_namespace(TARGET_NS)
+    h.kubectl("wait", "--for=delete", f"namespace/{TARGET_NS}", "--timeout=120s", check=False)
 
     with temporary_namespace(TARGET_NS):
         _apply_target(image)
