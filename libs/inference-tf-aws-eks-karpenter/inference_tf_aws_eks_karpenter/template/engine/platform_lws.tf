@@ -17,15 +17,19 @@ locals {
 resource "helm_release" "leader_worker_set" {
   count = var.enable_lws ? 1 : 0
 
-  name             = "leader-worker-set"
-  repository       = "https://kubernetes-sigs.github.io/leader-worker-set"
-  chart            = "leader-worker-set"
+  name             = "lws"
+  repository       = "oci://registry.k8s.io/lws/charts"
+  chart            = "lws"
   version          = var.lws_chart_version
   namespace        = local.lws_namespace
   create_namespace = true
 
   set = [
     { name = "replicaCount", value = "1" },
+    # Repin the controller image to its pull-through URI (PRIMARY resolution):
+    # registry.k8s.io/lws/lws -> <registry>/registry-k8s/lws/lws.
+    { name = "image.manager.repository", value = "${local.ecr_registry}/registry-k8s/lws/lws" },
+    { name = "image.manager.tag", value = "v${var.lws_chart_version}" },
     # System NG placement.
     { name = "nodeSelector.inference/role", value = "system" },
     { name = "tolerations[0].key", value = "inference/role" },

@@ -2,4 +2,6 @@ schema_version: 2
 # This template declares no required variables; all values come from presets
 # (engine/presets/defaults-all.tfvars). Override here for E2E if needed.
 required: {}
-overrides: {}
+overrides:
+  enable_lws: true
+  enable_kueue: true

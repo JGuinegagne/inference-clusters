@@ -1,0 +1,5 @@
+apiVersion: v2
+name: kueue-config
+description: Kueue queue configuration — Topology, ResourceFlavor, ClusterQueue, LocalQueue.
+type: application
+version: 0.1.0

@@ -333,11 +333,11 @@ variable "enable_lws" {
 
 variable "lws_chart_version" {
   description = <<-EOT
-    The Helm chart version for LeaderWorkerSet.
+    The Helm chart version for LeaderWorkerSet (oci://registry.k8s.io/lws/charts/lws).
 
     Published to registry.k8s.io (pull-through, no vendoring).
 
-    Recommended: 0.6.2
+    Recommended: 0.9.0
   EOT
   type        = string
 }
@@ -359,11 +359,11 @@ variable "enable_kueue" {
 
 variable "kueue_chart_version" {
   description = <<-EOT
-    The Helm chart version for Kueue.
+    The Helm chart version for Kueue (oci://registry.k8s.io/kueue/charts/kueue).
 
     Published to registry.k8s.io (pull-through, no vendoring).
 
-    Recommended: 0.10.0
+    Recommended: 0.18.2
   EOT
   type        = string
 }

@@ -62,10 +62,10 @@ common_images = []
 # --- Multi-node inference: LWS + Kueue + EFA ---
 # All gated (false by default). Enable for multi-node tracks.
 enable_lws     = false
-lws_chart_version = "0.6.2"
+lws_chart_version = "0.9.0"
 
 enable_kueue                          = false
-kueue_chart_version                   = "0.10.0"
+kueue_chart_version                   = "0.18.2"
 kueue_cluster_queue_name              = "inference-gpu"
 kueue_cohort_name                     = "gpu-cohort"
 kueue_gpu_quota                       = 64
@@ -77,4 +77,4 @@ kueue_wait_for_pods_ready_timeout     = "15m"
 kueue_wait_for_pods_ready_retries     = 3
 
 enable_efa                    = false
-efa_device_plugin_chart_version = "0.5.7"
+efa_device_plugin_chart_version = "v0.5.29"

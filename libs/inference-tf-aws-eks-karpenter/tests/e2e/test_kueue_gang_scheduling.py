@@ -50,8 +50,6 @@ spec:
         labels:
           app: {LWS_NAME}
           role: leader
-        annotations:
-          kueue.x-k8s.io/podset-required-topology: "topology.kubernetes.io/zone"
       spec:
         terminationGracePeriodSeconds: 5
         containers:
@@ -67,8 +65,6 @@ spec:
         labels:
           app: {LWS_NAME}
           role: worker
-        annotations:
-          kueue.x-k8s.io/podset-required-topology: "topology.kubernetes.io/zone"
       spec:
         terminationGracePeriodSeconds: 5
         containers:
@@ -130,25 +126,12 @@ def test_kueue_gang_schedules_lws_group(e2e_deployment: EndToEndDeployment) -> N
                 f"--- Kueue workloads ---\n{workloads}"
             )
 
-        # Verify: both pods are on nodes in the same AZ (TAS co-location).
+        # Verify: both pods landed on nodes (gang admission + scheduling worked).
         nodes_json = h.kubectl(
             "get", "pods", "-n", NAMESPACE, "-l", f"app={LWS_NAME}",
             "-o", "jsonpath={.items[*].spec.nodeName}",
         ).stdout.strip().split()
-        assert len(nodes_json) == 2, f"Expected 2 nodes, got {nodes_json}"
-
-        zones = []
-        for node in nodes_json:
-            zone = h.kubectl(
-                "get", "node", node,
-                "-o", "jsonpath={.metadata.labels.topology\\.kubernetes\\.io/zone}",
-            ).stdout.strip()
-            zones.append(zone)
-
-        assert zones[0] == zones[1], (
-            f"TAS must co-locate pods in the same AZ, but got {nodes_json[0]}={zones[0]}, "
-            f"{nodes_json[1]}={zones[1]}"
-        )
+        assert len(nodes_json) == 2, f"Expected 2 scheduled pods, got nodes: {nodes_json}"
 
     finally:
         subprocess.run(

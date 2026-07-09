@@ -1,0 +1,8 @@
+clusterQueueName: inference-gpu
+cohortName: gpu-cohort
+gpuQuota: 64
+gpuLendingLimit: 0
+cpuQuota: 768
+memoryQuota: "4Ti"
+workloadNamespace: inference
+chartContentHash: ""

@@ -1,0 +1,51 @@
+apiVersion: kueue.x-k8s.io/v1beta2
+kind: Topology
+metadata:
+  name: default
+spec:
+  levels:
+    - nodeLabel: topology.kubernetes.io/zone
+    - nodeLabel: kubernetes.io/hostname
+---
+apiVersion: kueue.x-k8s.io/v1beta2
+kind: ResourceFlavor
+metadata:
+  name: gpu-multinode
+spec:
+  nodeLabels:
+    karpenter.sh/nodepool: nvidia-p
+  topologyName: default
+  tolerations:
+    - key: nvidia.com/gpu
+      operator: Exists
+      effect: NoSchedule
+---
+apiVersion: kueue.x-k8s.io/v1beta2
+kind: ClusterQueue
+metadata:
+  name: {{ .Values.clusterQueueName }}
+spec:
+  namespaceSelector: {}
+  cohortName: {{ .Values.cohortName }}
+  resourceGroups:
+    - coveredResources: ["nvidia.com/gpu", "cpu", "memory"]
+      flavors:
+        - name: gpu-multinode
+          resources:
+            - name: nvidia.com/gpu
+              nominalQuota: {{ .Values.gpuQuota | quote }}
+            - name: cpu
+              nominalQuota: {{ .Values.cpuQuota | quote }}
+            - name: memory
+              nominalQuota: {{ .Values.memoryQuota | quote }}
+  preemption:
+    withinClusterQueue: LowerPriority
+    reclaimWithinCohort: LowerPriority
+---
+apiVersion: kueue.x-k8s.io/v1beta2
+kind: LocalQueue
+metadata:
+  name: inference
+  namespace: {{ .Values.workloadNamespace }}
+spec:
+  clusterQueue: {{ .Values.clusterQueueName }}
