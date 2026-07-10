@@ -54,9 +54,9 @@ resource "helm_release" "kueue" {
 
     # waitForPodsReady — prevents silent GPU leaks on partial provisioning
     { name = "controller.waitForPodsReady.enable", value = "true" },
-    { name = "controller.waitForPodsReady.timeout", value = var.kueue_wait_for_pods_ready_timeout },
+    { name = "controller.waitForPodsReady.timeout", value = "15m" },
     { name = "controller.waitForPodsReady.requeuingStrategy.timestamp", value = "Creation" },
-    { name = "controller.waitForPodsReady.requeuingStrategy.backoffLimitCount", value = tostring(var.kueue_wait_for_pods_ready_retries) },
+    { name = "controller.waitForPodsReady.requeuingStrategy.backoffLimitCount", value = "3" },
 
     # System NG placement.
     { name = "controllerManager.manager.nodeSelector.inference/role", value = "system" },
@@ -90,12 +90,12 @@ resource "helm_release" "kueue_config" {
 
   set = [
     { name = "clusterQueueName", value = var.kueue_cluster_queue_name },
-    { name = "cohortName", value = var.kueue_cohort_name },
+    { name = "cohortName", value = "gpu-cohort" },
     { name = "gpuQuota", value = tostring(var.kueue_gpu_quota) },
     { name = "gpuLendingLimit", value = tostring(var.kueue_gpu_lending_limit) },
     { name = "cpuQuota", value = tostring(var.kueue_cpu_quota) },
     { name = "memoryQuota", value = var.kueue_memory_quota },
-    { name = "workloadNamespace", value = var.kueue_workload_namespace },
+    { name = "workloadNamespace", value = "inference" },
     { name = "chartContentHash", value = local.chart_hashes["kueue"] },
   ]
 

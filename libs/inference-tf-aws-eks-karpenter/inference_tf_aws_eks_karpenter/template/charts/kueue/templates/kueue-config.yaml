@@ -13,7 +13,7 @@ metadata:
   name: gpu-multinode
 spec:
   nodeLabels:
-    karpenter.sh/nodepool: nvidia-p
+    inference/accelerator: nvidia-p
   topologyName: default
   tolerations:
     - key: nvidia.com/gpu
@@ -34,6 +34,9 @@ spec:
           resources:
             - name: nvidia.com/gpu
               nominalQuota: {{ .Values.gpuQuota | quote }}
+              {{- if .Values.gpuLendingLimit }}
+              lendingLimit: {{ .Values.gpuLendingLimit | quote }}
+              {{- end }}
             - name: cpu
               nominalQuota: {{ .Values.cpuQuota | quote }}
             - name: memory

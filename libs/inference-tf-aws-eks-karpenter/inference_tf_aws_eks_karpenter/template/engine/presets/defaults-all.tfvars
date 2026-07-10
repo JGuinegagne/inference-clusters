@@ -64,17 +64,13 @@ common_images = []
 enable_lws     = false
 lws_chart_version = "0.9.0"
 
-enable_kueue                          = false
-kueue_chart_version                   = "0.18.2"
-kueue_cluster_queue_name              = "inference-gpu"
-kueue_cohort_name                     = "gpu-cohort"
-kueue_gpu_quota                       = 64
-kueue_gpu_lending_limit               = 0
-kueue_cpu_quota                       = 768
-kueue_memory_quota                    = "4Ti"
-kueue_workload_namespace              = "inference"
-kueue_wait_for_pods_ready_timeout     = "15m"
-kueue_wait_for_pods_ready_retries     = 3
+enable_kueue             = false
+kueue_chart_version      = "0.18.2"
+kueue_cluster_queue_name = "inference-gpu"
+kueue_gpu_quota          = 64
+kueue_gpu_lending_limit  = 0
+kueue_cpu_quota          = 768
+kueue_memory_quota       = "4Ti"
 
 enable_efa                    = false
 efa_device_plugin_chart_version = "v0.5.29"

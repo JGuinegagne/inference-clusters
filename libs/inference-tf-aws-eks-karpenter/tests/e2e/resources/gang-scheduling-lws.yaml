@@ -1,0 +1,49 @@
+# LeaderWorkerSet for the Kueue gang-scheduling E2E test.
+#
+# 2-pod CPU-only group labeled with kueue.x-k8s.io/queue-name so Kueue gates
+# admission. Proves: Kueue admits atomically -> pods go Pending -> Karpenter
+# provisions -> both reach Running.
+#
+# Substitutions: ${image}, ${namespace}, ${queue_name}
+apiVersion: leaderworkerset.x-k8s.io/v1
+kind: LeaderWorkerSet
+metadata:
+  name: gang-e2e
+  namespace: ${namespace}
+  labels:
+    kueue.x-k8s.io/queue-name: ${queue_name}
+spec:
+  replicas: 1
+  leaderWorkerTemplate:
+    size: 2
+    restartPolicy: RecreateGroupOnPodRestart
+    leaderTemplate:
+      metadata:
+        labels:
+          app: gang-e2e
+          role: leader
+      spec:
+        terminationGracePeriodSeconds: 5
+        containers:
+          - name: worker
+            image: ${image}
+            command: ["sh", "-c", "echo leader ready; sleep 600"]
+            resources:
+              requests:
+                cpu: "250m"
+                memory: "128Mi"
+    workerTemplate:
+      metadata:
+        labels:
+          app: gang-e2e
+          role: worker
+      spec:
+        terminationGracePeriodSeconds: 5
+        containers:
+          - name: worker
+            image: ${image}
+            command: ["sh", "-c", "echo worker ready; sleep 600"]
+            resources:
+              requests:
+                cpu: "250m"
+                memory: "128Mi"

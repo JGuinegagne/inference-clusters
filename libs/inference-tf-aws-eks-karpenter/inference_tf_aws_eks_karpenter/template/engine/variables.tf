@@ -377,15 +377,6 @@ variable "kueue_cluster_queue_name" {
   type        = string
 }
 
-variable "kueue_cohort_name" {
-  description = <<-EOT
-    Cohort name for capacity borrowing/lending between queues.
-
-    Recommended: gpu-cohort
-  EOT
-  type        = string
-}
-
 variable "kueue_gpu_quota" {
   description = <<-EOT
     Nominal GPU quota for the inference ClusterQueue.
@@ -424,35 +415,6 @@ variable "kueue_memory_quota" {
   type        = string
 }
 
-variable "kueue_workload_namespace" {
-  description = <<-EOT
-    Namespace where the LocalQueue is created for inference workloads.
-
-    Recommended: inference
-  EOT
-  type        = string
-}
-
-variable "kueue_wait_for_pods_ready_timeout" {
-  description = <<-EOT
-    How long Kueue waits for all pods to become Ready before evicting.
-
-    This is the cost of the Kueue+Karpenter integration gap: if Karpenter
-    can't provision all nodes, you burn this much idle GPU time per retry.
-
-    Recommended: 15m
-  EOT
-  type        = string
-}
-
-variable "kueue_wait_for_pods_ready_retries" {
-  description = <<-EOT
-    Number of re-queue attempts on waitForPodsReady timeout.
-
-    Recommended: 3
-  EOT
-  type        = number
-}
 
 variable "enable_efa" {
   description = <<-EOT
@@ -468,11 +430,12 @@ variable "enable_efa" {
 
 variable "efa_device_plugin_chart_version" {
   description = <<-EOT
-    The Helm chart version for the AWS EFA device plugin.
+    The Helm chart version for the AWS EFA device plugin (eks-charts repo).
 
-    Published to public.ecr.aws (pull-through).
+    The image is repinned to public.ecr.aws/eks/aws-efa-k8s-device-plugin via
+    ECR pull-through.
 
-    Recommended: 0.5.7
+    Recommended: v0.5.29
   EOT
   type        = string
 }

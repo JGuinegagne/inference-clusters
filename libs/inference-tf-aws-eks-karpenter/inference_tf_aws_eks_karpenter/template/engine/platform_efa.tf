@@ -7,7 +7,11 @@
 # Placement: DaemonSet tolerates all taints so it runs on GPU dataplane nodes
 # (where the EFA interfaces physically exist). Not on system NG.
 #
-# Images: published to public.ecr.aws (no-creds pull-through).
+# Images: the upstream chart defaults to a PRIVATE cross-account ECR image
+# (602401143452.dkr.ecr.us-west-2.amazonaws.com/eks/aws-efa-k8s-device-plugin).
+# This won't pull in an endpoints-only VPC. We repin to the public.ecr.aws mirror
+# which resolves via our pull-through cache.
+#
 # Gated: only installed when enable_efa is true (not needed for single-node).
 
 resource "helm_release" "efa_device_plugin" {
@@ -20,6 +24,14 @@ resource "helm_release" "efa_device_plugin" {
   namespace  = "kube-system"
 
   set = [
+    # Repin image to pull-through URI (PRIMARY resolution). The upstream default
+    # is a private cross-account ECR that can't be reached from an endpoints-only
+    # VPC. public.ecr.aws/eks/aws-efa-k8s-device-plugin is the public mirror.
+    {
+      name  = "image.repository"
+      value = "${local.ecr_registry}/ecr-public/eks/aws-efa-k8s-device-plugin"
+    },
+    { name = "image.tag", value = var.efa_device_plugin_chart_version },
     # DaemonSet must tolerate all taints so it lands on GPU nodes.
     { name = "tolerations[0].operator", value = "Exists" },
     # Only run on nodes that actually have EFA interfaces.
@@ -28,6 +40,7 @@ resource "helm_release" "efa_device_plugin" {
 
   depends_on = [
     null_resource.cluster_addons,
+    null_resource.pullthrough_ready,
     module.node_group,
     helm_release.karpenter,
   ]
