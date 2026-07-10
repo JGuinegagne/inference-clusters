@@ -5,12 +5,17 @@
 # and NCCL falls back to TCP (unusable for multi-node TP at scale).
 #
 # Placement: DaemonSet tolerates all taints so it runs on GPU dataplane nodes
-# (where the EFA interfaces physically exist). Not on system NG.
+# (where the EFA interfaces physically exist). Not on system NG. The chart has
+# a built-in requiredDuringScheduling nodeAffinity on supportedInstanceLabels
+# that gates it to EFA-capable instance types — do NOT remove that affinity or
+# this hostNetwork/system-node-critical DaemonSet would spray onto every node.
 #
 # Images: the upstream chart defaults to a PRIVATE cross-account ECR image
 # (602401143452.dkr.ecr.us-west-2.amazonaws.com/eks/aws-efa-k8s-device-plugin).
 # This won't pull in an endpoints-only VPC. We repin to the public.ecr.aws mirror
-# which resolves via our pull-through cache.
+# which resolves via our pull-through cache. NOTE: chart version (v0.5.29) and
+# image version (v0.5.20 = appVersion) diverge — we let the chart default the tag
+# from appVersion rather than pinning explicitly.
 #
 # Gated: only installed when enable_efa is true (not needed for single-node).
 
@@ -24,18 +29,17 @@ resource "helm_release" "efa_device_plugin" {
   namespace  = "kube-system"
 
   set = [
-    # Repin image to pull-through URI (PRIMARY resolution). The upstream default
-    # is a private cross-account ECR that can't be reached from an endpoints-only
-    # VPC. public.ecr.aws/eks/aws-efa-k8s-device-plugin is the public mirror.
+    # Repin image repository to pull-through URI. Let the chart default tag from
+    # appVersion (v0.5.20) — chart version (v0.5.29) != image version.
     {
       name  = "image.repository"
       value = "${local.ecr_registry}/ecr-public/eks/aws-efa-k8s-device-plugin"
     },
-    { name = "image.tag", value = var.efa_device_plugin_chart_version },
     # DaemonSet must tolerate all taints so it lands on GPU nodes.
+    # The chart's built-in nodeAffinity on supportedInstanceLabels already limits
+    # it to EFA-capable instance types (p4d, p5, trn1, etc.) — no extra
+    # nodeSelector needed.
     { name = "tolerations[0].operator", value = "Exists" },
-    # Only run on nodes that actually have EFA interfaces.
-    { name = "nodeSelector.vpc\\.amazonaws\\.com/efa\\.present", value = "true" },
   ]
 
   depends_on = [

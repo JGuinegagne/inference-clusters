@@ -4,24 +4,11 @@
 # atomically or stays suspended. Three features are always-on when enabled:
 #
 # 1. TopologyAwareScheduling (TAS): guarantees AZ co-location for EFA.
-#    Workload pods annotated with podset-required-topology land in the same
-#    AZ *before* admission. Without TAS, Karpenter might provision nodes
-#    across AZs and NCCL hangs because EFA can't cross AZ boundaries.
-#
-# 2. Prometheus ServiceMonitor: queue health visibility (admission latency,
-#    eviction rate, quota utilization). Required for production observability.
-#
-# 3. waitForPodsReady: if Karpenter can't provision all nodes (3/4 arrive),
-#    Kueue evicts the workload after timeout, freeing GPUs for other work.
-#    Without this, partial provisioning silently leaks expensive GPUs.
-#
-# Integration with Karpenter: indirect but functional. Kueue un-gates pods →
-# pods go Pending → Karpenter reacts. No native ProvisioningRequest API
-# (Karpenter doesn't implement it). The gap is covered by waitForPodsReady.
+# 2. Prometheus ServiceMonitor: queue health visibility.
+# 3. waitForPodsReady: evicts workload on partial provisioning failure.
 #
 # Placement: controller on the tainted system NG.
-#
-# Images/chart: published to registry.k8s.io (no-creds pull-through).
+# Images/chart: OCI on registry.k8s.io (pull-through, no vendoring).
 
 locals {
   kueue_namespace = "kueue-system"
@@ -37,34 +24,52 @@ resource "helm_release" "kueue" {
   namespace        = local.kueue_namespace
   create_namespace = true
 
+  # LWS integration (requires LWS CRD — enable_lws must also be true)
   set = [
-    # LWS integration (requires LWS CRD — enable_lws must also be true)
     { name = "enableLeaderWorkerSet", value = "true" },
 
-    # Repin the controller image to its pull-through URI (PRIMARY resolution):
-    # registry.k8s.io/kueue/kueue -> <registry>/registry-k8s/kueue/kueue.
+    # Repin controller image to pull-through URI.
     { name = "controllerManager.manager.image.repository", value = "${local.ecr_registry}/registry-k8s/kueue/kueue" },
     { name = "controllerManager.manager.image.tag", value = "v${var.kueue_chart_version}" },
 
-    # TopologyAwareScheduling — required for EFA co-location
-    { name = "controller.featureGates.TopologyAwareScheduling", value = "true" },
+    # TAS feature gate (list format: the chart renders --feature-gates= from this)
+    { name = "controllerManager.featureGates[0].name", value = "TopologyAwareScheduling" },
+    { name = "controllerManager.featureGates[0].enabled", value = "true" },
 
-    # Prometheus ServiceMonitor — required for queue health visibility
-    { name = "controller.metrics.serviceMonitor.enabled", value = "true" },
+    # Prometheus ServiceMonitor (top-level toggle)
+    { name = "enablePrometheus", value = "true" },
 
-    # waitForPodsReady — prevents silent GPU leaks on partial provisioning
-    { name = "controller.waitForPodsReady.enable", value = "true" },
-    { name = "controller.waitForPodsReady.timeout", value = "15m" },
-    { name = "controller.waitForPodsReady.requeuingStrategy.timestamp", value = "Creation" },
-    { name = "controller.waitForPodsReady.requeuingStrategy.backoffLimitCount", value = "3" },
-
-    # System NG placement.
-    { name = "controllerManager.manager.nodeSelector.inference/role", value = "system" },
-    { name = "controllerManager.manager.tolerations[0].key", value = "inference/role" },
-    { name = "controllerManager.manager.tolerations[0].operator", value = "Equal" },
-    { name = "controllerManager.manager.tolerations[0].value", value = "system" },
-    { name = "controllerManager.manager.tolerations[0].effect", value = "NoSchedule" },
+    # System NG placement (controllerManager.nodeSelector / controllerManager.tolerations)
+    { name = "controllerManager.nodeSelector.inference/role", value = "system" },
+    { name = "controllerManager.tolerations[0].key", value = "inference/role" },
+    { name = "controllerManager.tolerations[0].operator", value = "Equal" },
+    { name = "controllerManager.tolerations[0].value", value = "system" },
+    { name = "controllerManager.tolerations[0].effect", value = "NoSchedule" },
   ]
+
+  # waitForPodsReady must be set via controllerManagerConfigYaml (not --set scalars).
+  values = [yamlencode({
+    controllerManager = {
+      controllerManagerConfigYaml = yamlencode({
+        apiVersion = "config.kueue.x-k8s.io/v1beta2"
+        kind       = "Configuration"
+        health = {
+          healthProbeBindAddress = ":8081"
+        }
+        metrics = {
+          bindAddress = ":8443"
+        }
+        waitForPodsReady = {
+          enable  = true
+          timeout = "15m"
+          requeuingStrategy = {
+            timestamp          = "Creation"
+            backoffLimitCount  = 3
+          }
+        }
+      })
+    }
+  })]
 
   depends_on = [
     null_resource.cluster_addons,
@@ -79,9 +84,7 @@ resource "helm_release" "kueue" {
 #
 # First-party local chart: Topology, ResourceFlavor, ClusterQueue, LocalQueue.
 # Installed as a helm_release (not kubernetes_manifest) because kubernetes_manifest
-# requires a live cluster connection at plan time — which doesn't exist during
-# `jd config` / `terraform plan` on a fresh scaffold. The local chart pattern
-# (same as charts/kro, charts/karpenter) defers CRD validation to apply time.
+# requires a live cluster connection at plan time.
 resource "helm_release" "kueue_config" {
   count     = var.enable_kueue ? 1 : 0
   name      = "kueue-config"

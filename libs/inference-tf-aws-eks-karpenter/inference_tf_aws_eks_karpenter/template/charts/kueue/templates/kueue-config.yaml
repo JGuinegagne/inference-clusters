@@ -21,6 +21,13 @@ spec:
       effect: NoSchedule
 ---
 apiVersion: kueue.x-k8s.io/v1beta2
+kind: ResourceFlavor
+metadata:
+  name: cpu-default
+spec:
+  topologyName: default
+---
+apiVersion: kueue.x-k8s.io/v1beta2
 kind: ClusterQueue
 metadata:
   name: {{ .Values.clusterQueueName }}
@@ -28,7 +35,7 @@ spec:
   namespaceSelector: {}
   cohortName: {{ .Values.cohortName }}
   resourceGroups:
-    - coveredResources: ["nvidia.com/gpu", "cpu", "memory"]
+    - coveredResources: ["nvidia.com/gpu"]
       flavors:
         - name: gpu-multinode
           resources:
@@ -37,6 +44,10 @@ spec:
               {{- if .Values.gpuLendingLimit }}
               lendingLimit: {{ .Values.gpuLendingLimit | quote }}
               {{- end }}
+    - coveredResources: ["cpu", "memory"]
+      flavors:
+        - name: cpu-default
+          resources:
             - name: cpu
               nominalQuota: {{ .Values.cpuQuota | quote }}
             - name: memory
