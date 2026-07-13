@@ -28,16 +28,16 @@ NAMESPACE = "inference"
 LOCAL_QUEUE = "inference"
 
 
-@pytest.mark.full_deployment
+@pytest.mark.mutating
 def test_kueue_gang_schedules_on_gpu_nodes(
     e2e_deployment: EndToEndDeployment,
     kubernetes_cluster_login: None,
 ) -> None:
     """Kueue admits a 2-pod GPU LWS; pods land on Karpenter g-tier nodes."""
-    e2e_deployment.ensure_deployed()
+    # Enable multinode operators (fixture already deployed the base cluster)
     e2e_deployment.update_override_value("enable_lws", True)
     e2e_deployment.update_override_value("enable_kueue", True)
-    e2e_deployment.ensure_deployed_with([], timeout_seconds=900)
+    e2e_deployment.ensure_deployed_with([], timeout_seconds=1200)
 
     image = h.client_image(e2e_deployment)
 
