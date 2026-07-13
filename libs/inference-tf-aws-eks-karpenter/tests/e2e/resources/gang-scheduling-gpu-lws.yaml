@@ -1,0 +1,63 @@
+# LeaderWorkerSet for the Kueue gang-scheduling GPU E2E test.
+#
+# 2-pod group requesting 1 GPU each, targeting the gpu-multinode flavor.
+# Proves: Kueue admits with GPU flavor → nodeLabels injected → pods land on
+# Karpenter nvidia-p (g-tier) nodes → both reach Running.
+#
+# Substitutions: ${image}, ${namespace}, ${queue_name}
+apiVersion: leaderworkerset.x-k8s.io/v1
+kind: LeaderWorkerSet
+metadata:
+  name: gang-gpu-e2e
+  namespace: ${namespace}
+  labels:
+    kueue.x-k8s.io/queue-name: ${queue_name}
+spec:
+  replicas: 1
+  leaderWorkerTemplate:
+    size: 2
+    restartPolicy: RecreateGroupOnPodRestart
+    leaderTemplate:
+      metadata:
+        labels:
+          app: gang-gpu-e2e
+          role: leader
+      spec:
+        terminationGracePeriodSeconds: 5
+        tolerations:
+          - key: nvidia.com/gpu
+            operator: Exists
+            effect: NoSchedule
+        containers:
+          - name: gpu-worker
+            image: ${image}
+            command: ["sh", "-c", "nvidia-smi && echo leader ready && sleep 600"]
+            resources:
+              requests:
+                nvidia.com/gpu: "1"
+                cpu: "1"
+                memory: "4Gi"
+              limits:
+                nvidia.com/gpu: "1"
+    workerTemplate:
+      metadata:
+        labels:
+          app: gang-gpu-e2e
+          role: worker
+      spec:
+        terminationGracePeriodSeconds: 5
+        tolerations:
+          - key: nvidia.com/gpu
+            operator: Exists
+            effect: NoSchedule
+        containers:
+          - name: gpu-worker
+            image: ${image}
+            command: ["sh", "-c", "nvidia-smi && echo worker ready && sleep 600"]
+            resources:
+              requests:
+                nvidia.com/gpu: "1"
+                cpu: "1"
+                memory: "4Gi"
+              limits:
+                nvidia.com/gpu: "1"

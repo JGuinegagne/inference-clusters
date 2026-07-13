@@ -58,3 +58,19 @@ kro_chart_version  = "0.9.2"
 # --- Image supply: common-utility images via pull-through ---
 # Each entry MUST use a no-creds trusted upstream (public.ecr.aws/quay.io/registry.k8s.io).
 common_images = []
+
+# --- Multi-node inference: LWS + Kueue + EFA ---
+# All gated (false by default). Enable for multi-node tracks.
+enable_lws     = false
+lws_chart_version = "0.9.0"
+
+enable_kueue             = false
+kueue_chart_version      = "0.18.2"
+kueue_cluster_queue_name = "inference-gpu"
+kueue_gpu_quota          = 64
+kueue_gpu_lending_limit  = 0
+kueue_cpu_quota          = 768
+kueue_memory_quota       = "4Ti"
+
+enable_efa                    = false
+efa_device_plugin_chart_version = "v0.5.29"

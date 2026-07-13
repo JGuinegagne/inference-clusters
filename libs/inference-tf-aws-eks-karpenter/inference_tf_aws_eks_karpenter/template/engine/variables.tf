@@ -316,3 +316,126 @@ variable "common_images" {
     error_message = "Every common_images entry must start with a trusted no-credentials registry host: public.ecr.aws/, quay.io/, or registry.k8s.io/ (Docker Hub/GHCR require credentials and are not supported; use the ECR Public mirror instead)."
   }
 }
+
+# === Multi-node inference (LWS + Kueue + EFA) ===
+
+variable "enable_lws" {
+  description = <<-EOT
+    Install the LeaderWorkerSet controller for multi-node pod group lifecycle.
+
+    Required for multi-node inference — manages leader/worker templates with
+    RecreateGroupOnPodRestart semantics (NCCL groups are not recoverable).
+
+    Recommended: true (for multi-node tracks)
+  EOT
+  type        = bool
+}
+
+variable "lws_chart_version" {
+  description = <<-EOT
+    The Helm chart version for LeaderWorkerSet (oci://registry.k8s.io/lws/charts/lws).
+
+    Published to registry.k8s.io (pull-through, no vendoring).
+
+    Recommended: 0.9.0
+  EOT
+  type        = string
+}
+
+variable "enable_kueue" {
+  description = <<-EOT
+    Install Kueue for admission control and gang scheduling of LWS workloads.
+
+    Kueue gates workloads behind GPU quota — the entire LWS group is admitted
+    atomically or stays suspended. Includes TAS (AZ co-location for EFA),
+    Prometheus ServiceMonitor, and waitForPodsReady (evicts on partial provisioning).
+
+    Requires enable_lws = true (LWS CRD must exist for Kueue's integration).
+
+    Recommended: true (for multi-node tracks)
+  EOT
+  type        = bool
+}
+
+variable "kueue_chart_version" {
+  description = <<-EOT
+    The Helm chart version for Kueue (oci://registry.k8s.io/kueue/charts/kueue).
+
+    Published to registry.k8s.io (pull-through, no vendoring).
+
+    Recommended: 0.18.2
+  EOT
+  type        = string
+}
+
+variable "kueue_cluster_queue_name" {
+  description = <<-EOT
+    Name of the ClusterQueue for GPU inference workloads.
+
+    Recommended: inference-gpu
+  EOT
+  type        = string
+}
+
+variable "kueue_gpu_quota" {
+  description = <<-EOT
+    Nominal GPU quota for the inference ClusterQueue.
+
+    Recommended: 64
+  EOT
+  type        = number
+}
+
+variable "kueue_gpu_lending_limit" {
+  description = <<-EOT
+    Maximum GPUs lent to other queues in the cohort when idle.
+
+    0 = no lending (all GPUs reserved for inference).
+
+    Recommended: 0
+  EOT
+  type        = number
+}
+
+variable "kueue_cpu_quota" {
+  description = <<-EOT
+    Nominal CPU quota for the inference ClusterQueue.
+
+    Recommended: 768
+  EOT
+  type        = number
+}
+
+variable "kueue_memory_quota" {
+  description = <<-EOT
+    Nominal memory quota for the inference ClusterQueue.
+
+    Recommended: 4Ti
+  EOT
+  type        = string
+}
+
+
+variable "enable_efa" {
+  description = <<-EOT
+    Install the AWS EFA device plugin for multi-node NCCL networking.
+
+    Required for multi-node inference with cross-node TP. Advertises EFA
+    interfaces as allocatable resources on GPU nodes.
+
+    Recommended: true (for multi-node tracks on p4d/p5/p5en)
+  EOT
+  type        = bool
+}
+
+variable "efa_device_plugin_chart_version" {
+  description = <<-EOT
+    The Helm chart version for the AWS EFA device plugin (eks-charts repo).
+
+    The image is repinned to public.ecr.aws/eks/aws-efa-k8s-device-plugin via
+    ECR pull-through.
+
+    Recommended: v0.5.29
+  EOT
+  type        = string
+}
