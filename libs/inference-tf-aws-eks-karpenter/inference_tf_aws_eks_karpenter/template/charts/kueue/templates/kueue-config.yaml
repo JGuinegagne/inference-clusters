@@ -1,12 +1,35 @@
+# Kueue queue configuration: one ResourceFlavor per tier + a single ClusterQueue.
+#
+# No TopologyAwareScheduling. TAS's value is a pre-admission topology-fit check
+# computed over EXISTING nodes — but on Karpenter (just-in-time provisioning)
+# there are no nodes at admission time, so TAS can't do its job and only adds
+# friction (a topologyName flavor rejects non-annotated workloads; a topology
+# podset must resolve to a single flavor; etc.). Kueue's ProvisioningRequest/TAS
+# path is Cluster-Autoscaler-only and Karpenter does not implement it
+# (karpenter#742 open, #2571 Buffer API is the future path, not yet shipped).
+#
+# EFA same-AZ co-location is instead enforced by podAffinity in the workload
+# spec (a GA scheduler primitive that works WITH Karpenter). Capacity guarantees
+# for scarce p-tier come from ODCR / Capacity Blocks (gpu_p_capacity_reservation_id),
+# not a software pre-check. waitForPodsReady is the reactive backstop.
+
+# --- g-tier GPU flavor (A10G/L4): plentiful, ICE-free ---
 apiVersion: kueue.x-k8s.io/v1beta2
-kind: Topology
+kind: ResourceFlavor
 metadata:
-  name: default
+  name: gpu-g
 spec:
-  levels:
-    - nodeLabel: topology.kubernetes.io/zone
-    - nodeLabel: kubernetes.io/hostname
+  nodeLabels:
+    inference/accelerator: nvidia-g
+  tolerations:
+    - key: nvidia.com/gpu
+      operator: Exists
+      effect: NoSchedule
 ---
+# --- p-tier GPU flavor (A100/H100/H200): gated, expensive. gpu-p NodePool
+# carries TWO taints (nodepools.yaml) — shared GPU + distinct high-tier — so
+# BOTH tolerations are required or Karpenter refuses to provision. Workloads
+# opt in via nodeSelector inference/accelerator=nvidia-p. ---
 apiVersion: kueue.x-k8s.io/v1beta2
 kind: ResourceFlavor
 metadata:
@@ -14,10 +37,13 @@ metadata:
 spec:
   nodeLabels:
     inference/accelerator: nvidia-p
-  topologyName: default
   tolerations:
     - key: nvidia.com/gpu
       operator: Exists
+      effect: NoSchedule
+    - key: inference/gpu-tier
+      value: "high"
+      operator: Equal
       effect: NoSchedule
 ---
 apiVersion: kueue.x-k8s.io/v1beta2
@@ -34,8 +60,18 @@ spec:
   namespaceSelector: {}
   cohortName: {{ .Values.cohortName }}
   resourceGroups:
-    - coveredResources: ["nvidia.com/gpu"]
+    # GPU + EFA share a resource group (both are node-level resources on GPU
+    # nodes). Flavors tried in order: gpu-g (default) then gpu-multinode (opt-in
+    # via nodeSelector inference/accelerator=nvidia-p). EFA quota gates admission
+    # of workloads that request vpc.amazonaws.com/efa.
+    - coveredResources: ["nvidia.com/gpu", "vpc.amazonaws.com/efa"]
       flavors:
+        - name: gpu-g
+          resources:
+            - name: nvidia.com/gpu
+              nominalQuota: {{ .Values.gpuGQuota | quote }}
+            - name: vpc.amazonaws.com/efa
+              nominalQuota: {{ .Values.efaQuota | quote }}
         - name: gpu-multinode
           resources:
             - name: nvidia.com/gpu
@@ -43,6 +79,8 @@ spec:
               {{- if .Values.gpuLendingLimit }}
               lendingLimit: {{ .Values.gpuLendingLimit | quote }}
               {{- end }}
+            - name: vpc.amazonaws.com/efa
+              nominalQuota: {{ .Values.efaQuota | quote }}
     - coveredResources: ["cpu", "memory"]
       flavors:
         - name: cpu-default
@@ -54,6 +92,14 @@ spec:
   preemption:
     withinClusterQueue: LowerPriority
     reclaimWithinCohort: LowerPriority
+---
+# Workload namespace — created here so the LocalQueue (and inference workloads)
+# have a home. The LocalQueue is namespaced; without this namespace the chart
+# apply fails (namespace not found) and no queue exists to admit workloads into.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .Values.workloadNamespace }}
 ---
 apiVersion: kueue.x-k8s.io/v1beta2
 kind: LocalQueue

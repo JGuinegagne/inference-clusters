@@ -377,11 +377,31 @@ variable "kueue_cluster_queue_name" {
   type        = string
 }
 
+variable "kueue_gpu_g_quota" {
+  description = <<-EOT
+    Nominal GPU quota for the default g-tier flavor (A10G/L4) in the inference ClusterQueue.
+
+    Recommended: 16
+  EOT
+  type        = number
+}
+
 variable "kueue_gpu_quota" {
   description = <<-EOT
-    Nominal GPU quota for the inference ClusterQueue.
+    Nominal GPU quota for the high-tier flavor (A100/H100/H200) in the inference ClusterQueue.
 
     Recommended: 64
+  EOT
+  type        = number
+}
+
+variable "kueue_efa_quota" {
+  description = <<-EOT
+    Nominal EFA-interface quota (vpc.amazonaws.com/efa) for GPU flavors in the inference ClusterQueue.
+
+    Gates admission of workloads requesting EFA interfaces for multi-node NCCL.
+
+    Recommended: 32
   EOT
   type        = number
 }
@@ -432,8 +452,10 @@ variable "efa_device_plugin_chart_version" {
   description = <<-EOT
     The Helm chart version for the AWS EFA device plugin (eks-charts repo).
 
-    The image is repinned to public.ecr.aws/eks/aws-efa-k8s-device-plugin via
-    ECR pull-through.
+    The chart's default image (EKS-managed regional ECR, same account as
+    vpc-cni) is used as-is — nodes already have pull access, so no repin or
+    vendoring. Chart version diverges from the image appVersion; the chart
+    handles that internally.
 
     Recommended: v0.5.29
   EOT

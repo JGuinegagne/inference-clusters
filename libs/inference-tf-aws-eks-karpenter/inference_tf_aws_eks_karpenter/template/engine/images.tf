@@ -151,6 +151,11 @@ locals {
       repo   = "vendored/keda-admission-webhooks"
       source = "ghcr.io/kedacore/keda-admission-webhooks:${var.keda_chart_version}"
     }
+    # NOTE: the EFA device plugin is NOT vendored. Its chart-default image lives on
+    # the EKS-managed regional ECR (602401143452 in us-west-2) — the same account
+    # the cluster already pulls vpc-cni/kube-proxy from — so nodes can pull it
+    # directly (see platform_efa.tf). It is not on public.ecr.aws, so pull-through
+    # can't proxy it either; the direct EKS-ECR pull is the correct path.
   }
 
   vendored_tag = "vendored"

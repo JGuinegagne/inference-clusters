@@ -1,11 +1,17 @@
 # === Kueue — admission control + gang scheduling for multi-node inference ===
 #
 # Kueue gates LWS workloads behind quota — the entire group is admitted
-# atomically or stays suspended. Three features are always-on when enabled:
+# atomically or stays suspended. Two features are on when enabled:
 #
-# 1. TopologyAwareScheduling (TAS): guarantees AZ co-location for EFA.
-# 2. Prometheus ServiceMonitor: queue health visibility.
-# 3. waitForPodsReady: evicts workload on partial provisioning failure.
+# 1. Prometheus ServiceMonitor: queue health visibility.
+# 2. waitForPodsReady: evicts workload on partial provisioning failure — the
+#    reactive backstop for the Karpenter capacity pre-check gap (Karpenter can't
+#    confirm hardware exists before Kueue admits; ProvisioningRequest is
+#    Cluster-Autoscaler-only, karpenter#742/#2571).
+#
+# NOT TAS: TopologyAwareScheduling pre-computes topology fit over existing nodes,
+# which is meaningless on Karpenter JIT provisioning. EFA same-AZ co-location is
+# enforced via podAffinity in the workload spec instead.
 #
 # Placement: controller on the tainted system NG.
 # Images/chart: OCI on registry.k8s.io (pull-through, no vendoring).
@@ -29,9 +35,10 @@ resource "helm_release" "kueue" {
     { name = "controllerManager.manager.image.repository", value = "${local.ecr_registry}/registry-k8s/kueue/kueue" },
     { name = "controllerManager.manager.image.tag", value = "v${var.kueue_chart_version}" },
 
-    # TAS feature gate (list format: the chart renders --feature-gates= from this)
-    { name = "controllerManager.featureGates[0].name", value = "TopologyAwareScheduling" },
-    { name = "controllerManager.featureGates[0].enabled", value = "true" },
+    # NOTE: TopologyAwareScheduling is intentionally NOT enabled. TAS pre-computes
+    # topology fit over existing nodes, which is meaningless on Karpenter's
+    # just-in-time provisioning (no nodes at admission time). EFA same-AZ
+    # co-location is enforced via podAffinity in the workload spec instead.
 
     # Prometheus ServiceMonitor (top-level toggle)
     { name = "enablePrometheus", value = "true" },
@@ -116,7 +123,7 @@ resource "helm_release" "kueue" {
 
 # --- Kueue queue configuration (charts/kueue) ---
 #
-# First-party local chart: Topology, ResourceFlavor, ClusterQueue, LocalQueue.
+# First-party local chart: ResourceFlavors, ClusterQueue, LocalQueue, namespace.
 # Installed as a helm_release (not kubernetes_manifest) because kubernetes_manifest
 # requires a live cluster connection at plan time.
 resource "helm_release" "kueue_config" {
@@ -128,7 +135,9 @@ resource "helm_release" "kueue_config" {
   set = [
     { name = "clusterQueueName", value = var.kueue_cluster_queue_name },
     { name = "cohortName", value = "gpu-cohort" },
+    { name = "gpuGQuota", value = tostring(var.kueue_gpu_g_quota) },
     { name = "gpuQuota", value = tostring(var.kueue_gpu_quota) },
+    { name = "efaQuota", value = tostring(var.kueue_efa_quota) },
     { name = "gpuLendingLimit", value = tostring(var.kueue_gpu_lending_limit) },
     { name = "cpuQuota", value = tostring(var.kueue_cpu_quota) },
     { name = "memoryQuota", value = var.kueue_memory_quota },

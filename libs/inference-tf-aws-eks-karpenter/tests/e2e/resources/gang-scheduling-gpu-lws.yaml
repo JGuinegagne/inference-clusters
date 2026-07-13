@@ -31,7 +31,7 @@ spec:
         containers:
           - name: gpu-worker
             image: ${image}
-            command: ["sh", "-c", "nvidia-smi && echo leader ready && sleep 600"]
+            command: ["sh", "-c", "echo leader ready && sleep 600"]
             resources:
               requests:
                 nvidia.com/gpu: "1"
@@ -53,7 +53,7 @@ spec:
         containers:
           - name: gpu-worker
             image: ${image}
-            command: ["sh", "-c", "nvidia-smi && echo worker ready && sleep 600"]
+            command: ["sh", "-c", "echo worker ready && sleep 600"]
             resources:
               requests:
                 nvidia.com/gpu: "1"

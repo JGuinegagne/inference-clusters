@@ -4,16 +4,20 @@ Validates the full GPU gang scheduling path:
 
   1. Enable LWS + Kueue on the cluster
   2. Create a 2-pod LWS requesting 1 GPU each, labeled with Kueue queue
-  3. Assert: Kueue Workload reaches Admitted=True with gpu-multinode flavor
+  3. Assert: Kueue Workload reaches Admitted=True with the gpu-g flavor
   4. Assert: pods land on Karpenter g-tier nodes (inference/accelerator=nvidia-g)
   5. Assert: both pods reach Running
 
 This exercises the GPU ResourceFlavor injection: Kueue admits → injects
-nodeLabels (inference/accelerator=nvidia-p) + tolerations → pods schedule
-on the correct NodePool.
+the gpu-g flavor's nodeLabels (inference/accelerator=nvidia-g) + toleration →
+pods schedule on the g NodePool.
 
-Marked `full_deployment` — requires a live cluster with GPU capacity.
-Uses g-tier (not p-tier) to avoid ICE on scarce H100 capacity.
+Uses the g-tier flavor (A10G/L4), NOT the p-tier (gpu-multinode / nvidia-p)
+flavor, because p-tier (A100/H100/H200) is scarce and returns InsufficientCapacity
+on-demand — that would flake the test on hardware availability, not code. The
+gang-scheduling mechanism is identical across tiers; g-tier proves it reliably.
+
+Marked `mutating` — enables the operators and re-applies.
 """
 
 import time
@@ -94,7 +98,7 @@ def test_kueue_gang_schedules_on_gpu_nodes(
                 f"--- Pod describe ---\n{desc[-2000:]}"
             )
 
-        # Assert pods landed on Karpenter GPU nodes
+        # Assert pods landed on Karpenter g-tier GPU nodes (the gpu-g flavor)
         nodes = h.kubectl(
             "get", "pods", "-n", NAMESPACE, "-l", f"app={LWS_NAME}",
             "-o", "jsonpath={.items[*].spec.nodeName}",
@@ -102,12 +106,13 @@ def test_kueue_gang_schedules_on_gpu_nodes(
         assert len(nodes) == 2, f"Expected 2 scheduled pods, got: {nodes}"
 
         for node in nodes:
-            labels = h.kubectl(
-                "get", "node", node, "-o", "jsonpath={.metadata.labels}",
-            ).stdout
-            assert "nvidia" in labels, (
-                f"Pod must run on a Karpenter GPU node, "
-                f"but {node} labels don't contain nvidia: {labels[:200]}"
+            accelerator = h.kubectl(
+                "get", "node", node,
+                "-o", r"jsonpath={.metadata.labels.inference/accelerator}",
+            ).stdout.strip()
+            assert accelerator == "nvidia-g", (
+                f"Pod must run on a g-tier GPU node (gpu-g flavor), "
+                f"but {node} has inference/accelerator={accelerator!r}"
             )
 
     finally:
