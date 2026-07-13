@@ -33,11 +33,10 @@ def test_kueue_gang_schedules_lws_group(
     kubernetes_cluster_login: None,
 ) -> None:
     """Kueue admits a 2-pod LWS atomically; Karpenter provisions nodes; both pods Ready."""
-    # Enable multinode operators on the base cluster
-    e2e_deployment.ensure_deployed()
+    # Enable multinode operators (fixture already deployed the base cluster)
     e2e_deployment.update_override_value("enable_lws", True)
     e2e_deployment.update_override_value("enable_kueue", True)
-    e2e_deployment.ensure_deployed_with([], timeout_seconds=900)
+    e2e_deployment.ensure_deployed_with([], timeout_seconds=1200)
 
     image = h.client_image(e2e_deployment)
 

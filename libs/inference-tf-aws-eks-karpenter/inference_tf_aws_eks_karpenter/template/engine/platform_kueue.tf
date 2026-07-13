@@ -74,10 +74,11 @@ resource "helm_release" "kueue" {
           qps: 50
           burst: 100
         waitForPodsReady:
-          enable: true
           timeout: 15m
+          recoveryTimeout: 3m
+          blockAdmission: true
           requeuingStrategy:
-            timestamp: Creation
+            timestamp: Eviction
             backoffLimitCount: 3
             backoffBaseSeconds: 60
             backoffMaxSeconds: 3600
