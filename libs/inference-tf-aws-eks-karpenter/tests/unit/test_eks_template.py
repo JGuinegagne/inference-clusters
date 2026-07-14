@@ -958,3 +958,89 @@ def test_agent_md_documents_gpu_tiers_and_seams() -> None:
     assert "gpu_p_capacity_reservation_id" in content, "must document the ODCR seam"
     for seam in ("ODCR", "Shared GPU pool"):
         assert seam in content, f"must document the {seam} seam"
+
+
+# --- Multi-node: EFA device plugin ---
+
+
+def test_efa_registry_inferred_not_hardcoded() -> None:
+    """The EFA image's EKS regional registry MUST be inferred from vpc-cni, never hardcoded.
+
+    The EFA plugin lives only on the EKS-managed regional ECR, whose account is
+    region-specific. Instead of a region->account map, we read the already-installed
+    vpc-cni (aws-node) DaemonSet image and take its <account>.dkr.ecr.<region> prefix —
+    whatever EKS resolved for this region/partition. Guards against a regression back
+    to a hardcoded account or lookup map.
+    """
+    images = (ENGINE / "images.tf").read_text()
+    # The inference source: the aws-node DaemonSet image prefix.
+    assert 'data "kubernetes_resource" "aws_node"' in images, (
+        "EFA registry must be inferred from the vpc-cni (aws-node) DaemonSet"
+    )
+    assert "eks_ecr_registry = " in images and "split(" in images, (
+        "eks_ecr_registry must be the split() prefix of the aws-node image, not a literal"
+    )
+    # No hardcoded EKS account or region->account map may creep back in.
+    assert "602401143452" not in images, "the EKS ECR account must never be hardcoded in images.tf"
+    assert "eks_ecr_account_by_region" not in images, "no region->account lookup map (that isn't inference)"
+    # The read must defer to apply (it needs a live cluster) and be gated on EFA.
+    efa_block = images[images.index("efa_vendored_images") :]
+    assert "var.enable_efa ?" in efa_block, "EFA vendoring must be gated on enable_efa"
+    assert "eks/aws-efa-k8s-device-plugin" in images, "EFA source repo path must be the EKS convention"
+
+
+def test_efa_image_vendored_and_release_repinned() -> None:
+    """EFA is NOT on public.ecr.aws → it MUST be vendored into our ECR and the release repinned."""
+    images = (ENGINE / "images.tf").read_text()
+    assert "efa_device_plugin" in images, "efa_device_plugin must be a vendored_images entry"
+    block = _extract_resource_block((ENGINE / "platform_efa.tf").read_text(), "helm_release", "efa_device_plugin")
+    assert 'aws_ecr_repository.vendored["efa_device_plugin"]' in block, (
+        "EFA release image.repository must resolve to the vendored ECR repo"
+    )
+    assert "local.vendored_tag" in block, "EFA release image.tag must be the vendored tag"
+    assert "null_resource.image_vendor" in block, "EFA release must depend on the vendor job completing"
+
+
+# --- Capacity: one source of truth for NodePool limits AND Kueue quota ---
+
+
+def test_capacity_caps_feed_both_nodepool_limits_and_kueue_quota() -> None:
+    """The *_capacity vars are the SINGLE source of truth: same value → NodePool spec.limits
+    AND Kueue nominalQuota, so admission (Kueue) can never exceed provisioning (Karpenter).
+
+    Guards against the reviewer's objection to a standalone manual Kueue quota dial: the
+    quota is DERIVED from the capacity caps, not set independently.
+    """
+    karpenter = (ENGINE / "platform_karpenter.tf").read_text()
+    kueue = (ENGINE / "platform_kueue.tf").read_text()
+    # Each capacity var must feed the Karpenter NodePool limit...
+    for cap, chart_key in [
+        ("var.gpu_g_capacity", "gpuG.gpuLimit"),
+        ("var.gpu_p_capacity", "gpuP.gpuLimit"),
+        ("var.cpu_capacity", "cpu.cpuLimit"),
+        ("var.memory_capacity", "cpu.memoryLimit"),
+    ]:
+        assert chart_key in karpenter and cap in karpenter, f"{cap} must set the Karpenter NodePool {chart_key}"
+    # ...and the SAME var must feed the Kueue quota (derived, not a separate knob).
+    assert "gpuGQuota" in kueue and "var.gpu_g_capacity" in kueue, "Kueue gpuGQuota must derive from gpu_g_capacity"
+    assert "gpuQuota" in kueue and "var.gpu_p_capacity" in kueue, "Kueue gpuQuota must derive from gpu_p_capacity"
+    assert "cpuQuota" in kueue and "var.cpu_capacity" in kueue, "Kueue cpuQuota must derive from cpu_capacity"
+    assert "memoryQuota" in kueue and "var.memory_capacity" in kueue, (
+        "Kueue memoryQuota must derive from memory_capacity"
+    )
+    # The redundant manual quota vars the reviewer objected to must be gone.
+    variables = (ENGINE / "variables.tf").read_text()
+    for dead in ("kueue_gpu_g_quota", "kueue_gpu_quota", "kueue_efa_quota", "kueue_cpu_quota", "kueue_memory_quota"):
+        assert f'variable "{dead}"' not in variables, f"the manual quota var {dead} must be removed (derived now)"
+
+
+def test_kueue_efa_quota_derived_from_gpu_quota() -> None:
+    """EFA nominalQuota is NOT a separate dial — it equals the flavor's GPU quota (a pod needs
+    a GPU to use EFA and a node carries ≤1 EFA, so GPU is the binding constraint)."""
+    cfg = (TEMPLATE_PATH / "charts" / "kueue" / "templates" / "kueue-config.yaml").read_text()
+    assert ".Values.efaQuota" not in cfg, "EFA must not use a standalone efaQuota value"
+    # Both flavors set the EFA nominalQuota from the same key as their GPU nominalQuota.
+    assert cfg.count("{{ .Values.gpuGQuota | quote }}") == 2, "gpu-g flavor: GPU and EFA quota both from gpuGQuota"
+    assert cfg.count("{{ .Values.gpuQuota | quote }}") == 2, (
+        "gpu-multinode flavor: GPU and EFA quota both from gpuQuota"
+    )

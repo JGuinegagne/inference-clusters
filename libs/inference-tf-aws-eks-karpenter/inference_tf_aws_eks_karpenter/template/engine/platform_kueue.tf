@@ -132,15 +132,20 @@ resource "helm_release" "kueue_config" {
   chart     = "${path.module}/../charts/kueue"
   namespace = local.kueue_namespace
 
+  # Kueue nominalQuota is DERIVED from the capacity caps that also set the Karpenter
+  # NodePool spec.limits (platform_karpenter.tf) — one source of truth per tier, so
+  # Kueue never admits more GPUs/CPU/memory than Karpenter is allowed to provision.
+  # EFA quota is not a separate dial: a pod requesting EFA also requests a GPU and a
+  # node carries ≤1 EFA, so per-flavor EFA demand ≤ that flavor's GPU quota — the
+  # chart sets the g-flavor EFA nominalQuota equal to gpuGQuota.
   set = [
     { name = "clusterQueueName", value = var.kueue_cluster_queue_name },
     { name = "cohortName", value = "gpu-cohort" },
-    { name = "gpuGQuota", value = tostring(var.kueue_gpu_g_quota) },
-    { name = "gpuQuota", value = tostring(var.kueue_gpu_quota) },
-    { name = "efaQuota", value = tostring(var.kueue_efa_quota) },
+    { name = "gpuGQuota", value = tostring(var.gpu_g_capacity) },
+    { name = "gpuQuota", value = tostring(var.gpu_p_capacity) },
     { name = "gpuLendingLimit", value = tostring(var.kueue_gpu_lending_limit) },
-    { name = "cpuQuota", value = tostring(var.kueue_cpu_quota) },
-    { name = "memoryQuota", value = var.kueue_memory_quota },
+    { name = "cpuQuota", value = tostring(var.cpu_capacity) },
+    { name = "memoryQuota", value = var.memory_capacity },
     { name = "workloadNamespace", value = "inference" },
     { name = "chartContentHash", value = local.chart_hashes["kueue"] },
   ]

@@ -240,6 +240,12 @@ resource "helm_release" "karpenter_nodepools" {
     # opts in (nvidia-p label + taint). ODCR id pins it to a reservation if set.
     { name = "gpuP.enabled", value = tostring(var.enable_gpu_p_nodepool) },
     { name = "gpuP.capacityReservationId", value = var.gpu_p_capacity_reservation_id },
+    # Capacity caps → NodePool spec.limits. These SAME values derive the Kueue
+    # flavor nominalQuota (platform_kueue.tf), so admission never exceeds capacity.
+    { name = "cpu.cpuLimit", value = tostring(var.cpu_capacity) },
+    { name = "cpu.memoryLimit", value = var.memory_capacity },
+    { name = "gpuG.gpuLimit", value = tostring(var.gpu_g_capacity) },
+    { name = "gpuP.gpuLimit", value = tostring(var.gpu_p_capacity) },
     # Chart content hash so editing a chart file triggers a re-apply (see main.tf).
     { name = "chartContentHash", value = local.chart_hashes["karpenter"] },
   ]

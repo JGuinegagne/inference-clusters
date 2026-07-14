@@ -56,8 +56,12 @@ def test_kueue_gang_schedules_lws_group(
         admitted = False
         for _ in range(30):  # ~5 min
             result = h.kubectl(
-                "get", "workloads", "-n", NAMESPACE,
-                "-o", "jsonpath={.items[0].status.conditions[?(@.type=='Admitted')].status}",
+                "get",
+                "workloads",
+                "-n",
+                NAMESPACE,
+                "-o",
+                "jsonpath={.items[0].status.conditions[?(@.type=='Admitted')].status}",
                 check=False,
             )
             if result.stdout.strip() == "True":
@@ -67,17 +71,20 @@ def test_kueue_gang_schedules_lws_group(
 
         if not admitted:
             workloads = h.kubectl("get", "workloads", "-n", NAMESPACE, "-o", "wide", check=False).stdout
-            raise AssertionError(
-                f"Kueue Workload never reached Admitted=True\n"
-                f"--- Kueue workloads ---\n{workloads}"
-            )
+            raise AssertionError(f"Kueue Workload never reached Admitted=True\n--- Kueue workloads ---\n{workloads}")
 
         # Wait for both pods to reach Running
         all_ready = False
         for _ in range(18):  # ~3 min (admission already happened)
             result = h.kubectl(
-                "get", "pods", "-n", NAMESPACE, "-l", f"app={LWS_NAME}",
-                "-o", "jsonpath={.items[*].status.phase}",
+                "get",
+                "pods",
+                "-n",
+                NAMESPACE,
+                "-l",
+                f"app={LWS_NAME}",
+                "-o",
+                "jsonpath={.items[*].status.phase}",
                 check=False,
             )
             phases = result.stdout.strip().split()
@@ -87,24 +94,34 @@ def test_kueue_gang_schedules_lws_group(
             time.sleep(10)
 
         if not all_ready:
-            desc = h.kubectl(
-                "describe", "pods", "-n", NAMESPACE, "-l", f"app={LWS_NAME}", check=False
-            ).stdout
-            raise AssertionError(
-                f"Expected 2 Running pods, got phases: {phases}\n"
-                f"--- Pod describe ---\n{desc[-2000:]}"
-            )
+            desc = h.kubectl("describe", "pods", "-n", NAMESPACE, "-l", f"app={LWS_NAME}", check=False).stdout
+            raise AssertionError(f"Expected 2 Running pods, got phases: {phases}\n--- Pod describe ---\n{desc[-2000:]}")
 
         # Verify pods are scheduled on nodes
-        nodes = h.kubectl(
-            "get", "pods", "-n", NAMESPACE, "-l", f"app={LWS_NAME}",
-            "-o", "jsonpath={.items[*].spec.nodeName}",
-        ).stdout.strip().split()
+        nodes = (
+            h.kubectl(
+                "get",
+                "pods",
+                "-n",
+                NAMESPACE,
+                "-l",
+                f"app={LWS_NAME}",
+                "-o",
+                "jsonpath={.items[*].spec.nodeName}",
+            )
+            .stdout.strip()
+            .split()
+        )
         assert len(nodes) == 2, f"Expected 2 scheduled pods, got: {nodes}"
 
     finally:
         # Deleting the LWS cascades to all owned pods (same as Deployment/StatefulSet)
         h.kubectl(
-            "delete", "leaderworkerset", LWS_NAME, "-n", NAMESPACE,
-            "--ignore-not-found", check=False,
+            "delete",
+            "leaderworkerset",
+            LWS_NAME,
+            "-n",
+            NAMESPACE,
+            "--ignore-not-found",
+            check=False,
         )

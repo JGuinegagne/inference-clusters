@@ -34,6 +34,13 @@ spec:
         - key: karpenter.k8s.aws/instance-generation
           operator: Gt
           values: ["{{ .Values.cpu.instanceGeneration }}"]
+  # Authoritative capacity cap for the CPU pool. This is the single source of
+  # truth for CPU/memory capacity — Kueue's ClusterQueue nominalQuota is derived
+  # from the SAME Terraform values (platform_kueue.tf), so Kueue never admits more
+  # than Karpenter will provision, and the two cannot drift.
+  limits:
+    cpu: {{ .Values.cpu.cpuLimit }}
+    memory: {{ .Values.cpu.memoryLimit }}
   disruption:
     consolidationPolicy: {{ .Values.consolidationPolicy }}
     consolidateAfter: 1m
@@ -65,6 +72,10 @@ spec:
         - key: karpenter.k8s.aws/instance-family
           operator: In
           values: {{ .Values.gpuG.instanceFamilies | toJson }}
+  # Authoritative GPU cap for the g-tier pool. Kueue's gpu-g flavor nominalQuota
+  # (nvidia.com/gpu AND vpc.amazonaws.com/efa) is derived from this SAME value.
+  limits:
+    nvidia.com/gpu: {{ .Values.gpuG.gpuLimit }}
   disruption:
     consolidationPolicy: {{ .Values.consolidationPolicy }}
     consolidateAfter: 1m
@@ -106,6 +117,10 @@ spec:
         - key: karpenter.k8s.aws/instance-family
           operator: In
           values: {{ .Values.gpuP.instanceFamilies | toJson }}
+  # Authoritative GPU cap for the high-tier P pool. Kueue's gpu-multinode flavor
+  # nominalQuota is derived from this SAME value.
+  limits:
+    nvidia.com/gpu: {{ .Values.gpuP.gpuLimit }}
   disruption:
     consolidationPolicy: {{ .Values.consolidationPolicy }}
     consolidateAfter: 1m

@@ -1,7 +1,6 @@
 clusterQueueName: inference-gpu
 cohortName: gpu-cohort
 gpuGQuota: 16
-efaQuota: 32
 gpuQuota: 64
 gpuLendingLimit: 0
 cpuQuota: 768

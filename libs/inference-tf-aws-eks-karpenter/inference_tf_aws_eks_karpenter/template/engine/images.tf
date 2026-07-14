@@ -112,12 +112,44 @@ resource "null_resource" "pullthrough_ready" {
 # platform images with no no-creds home. Add an entry → it gets an ECR repo, IAM
 # scope, and a build trigger automatically.
 
+# The EFA device-plugin image lives ONLY on the EKS-managed regional ECR (it is
+# NOT on public.ecr.aws, so pull-through can't proxy it). That registry's account
+# is region-specific (one account covers most regions, a distinct account for ~15
+# opt-in/newer ones). Rather than hardcode a region→account map, we INFER the
+# registry from an add-on EKS already installed: the vpc-cni (aws-node) DaemonSet's
+# image is <account>.dkr.ecr.<region>.amazonaws.com/amazon-k8s-cni:<tag> — whatever
+# EKS resolved for THIS region/partition. The EFA image sits on the same registry,
+# so we vendor it from there into our own ECR (like every other platform image),
+# and nodes pull the private copy. Only read/vendored when EFA is enabled.
+data "kubernetes_resource" "aws_node" {
+  count       = var.enable_efa ? 1 : 0
+  api_version = "apps/v1"
+  kind        = "DaemonSet"
+
+  metadata {
+    name      = "aws-node"
+    namespace = "kube-system"
+  }
+
+  # cluster_addons is the "providers authorized + all add-ons up" barrier: it
+  # aggregates vpc-cni (so its DaemonSet image is readable) and the access
+  # associations/entry (so the kubernetes provider can authenticate). depends_on
+  # defers the read to apply, so eks_ecr_registry is unknown at plan — fine, it
+  # only feeds a null_resource trigger (apply-time), never a for_each key.
+  depends_on = [null_resource.cluster_addons]
+}
+
 locals {
+  # <account>.dkr.ecr.<region>.amazonaws.com — the EKS-managed regional registry,
+  # inferred from the vpc-cni image (see above). Empty when EFA is disabled (the
+  # data source isn't read then, and nothing references this).
+  eks_ecr_registry = var.enable_efa ? split("/", data.kubernetes_resource.aws_node[0].object.spec.template.spec.containers[0].image)[0] : ""
+
   # source (pinned upstream ref) → our ECR repo. Keys are stable (renaming one
   # replaces its repo). value.repo is the LOGICAL repo suffix; the actual ECR repo
   # name is prefixed with resource_name_prefix (below) so two deployments in the same
   # account+region get distinct repos and never collide on create/force_delete.
-  vendored_images = {
+  base_vendored_images = {
     # nvcr.io — no no-creds mirror at all.
     device_plugin = {
       repo   = "gpu/k8s-device-plugin"
@@ -151,12 +183,21 @@ locals {
       repo   = "vendored/keda-admission-webhooks"
       source = "ghcr.io/kedacore/keda-admission-webhooks:${var.keda_chart_version}"
     }
-    # NOTE: the EFA device plugin is NOT vendored. Its chart-default image lives on
-    # the EKS-managed regional ECR (602401143452 in us-west-2) — the same account
-    # the cluster already pulls vpc-cni/kube-proxy from — so nodes can pull it
-    # directly (see platform_efa.tf). It is not on public.ecr.aws, so pull-through
-    # can't proxy it either; the direct EKS-ECR pull is the correct path.
   }
+
+  # EFA device plugin — vendored from the inferred EKS regional ECR (see the
+  # kubernetes_resource above), NOT a hardcoded account. Merged in only when EFA
+  # is enabled: the source references eks_ecr_registry (empty/unknown otherwise).
+  # The repo path `eks/aws-efa-k8s-device-plugin` is the stable EKS convention;
+  # the tag is the chart's appVersion (which the chart also defaults image.tag to).
+  efa_vendored_images = var.enable_efa ? {
+    efa_device_plugin = {
+      repo   = "vendored/aws-efa-k8s-device-plugin"
+      source = "${local.eks_ecr_registry}/eks/aws-efa-k8s-device-plugin:${var.efa_device_plugin_image_tag}"
+    }
+  } : {}
+
+  vendored_images = merge(local.base_vendored_images, local.efa_vendored_images)
 
   vendored_tag = "vendored"
 }
@@ -210,7 +251,14 @@ module "image_vendor" {
       pre_build:
         commands:
           - command -v skopeo >/dev/null 2>&1 || (apt-get update -y && apt-get install -y skopeo)
-          - aws ecr get-login-password --region $AWS_DEFAULT_REGION | skopeo login --username AWS --password-stdin $ECR_REGISTRY
+          - ECR_PASSWORD=$(aws ecr get-login-password --region $AWS_DEFAULT_REGION)
+          - echo "$ECR_PASSWORD" | skopeo login --username AWS --password-stdin $ECR_REGISTRY
+          # If the SOURCE is an ECR registry (e.g. the EKS-managed regional ECR the
+          # EFA image lives on, possibly a different account), log in there too. The
+          # same regional token authorizes cross-account pull when that repo's
+          # resource policy allows it (as EKS's managed repos do for all accounts).
+          - SRC_REGISTRY=$(echo "$SRC_IMAGE" | cut -d/ -f1)
+          - case "$SRC_REGISTRY" in *.dkr.ecr.*.amazonaws.com) echo "$ECR_PASSWORD" | skopeo login --username AWS --password-stdin "$SRC_REGISTRY" ;; esac
       build:
         commands:
           - skopeo copy "docker://$SRC_IMAGE" "docker://$DST_IMAGE"

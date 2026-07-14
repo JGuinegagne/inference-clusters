@@ -377,31 +377,28 @@ variable "kueue_cluster_queue_name" {
   type        = string
 }
 
-variable "kueue_gpu_g_quota" {
+variable "gpu_g_capacity" {
   description = <<-EOT
-    Nominal GPU quota for the default g-tier flavor (A10G/L4) in the inference ClusterQueue.
+    Max g-tier GPUs (A10G/L4) the cluster may provision — the g NodePool's cap.
+
+    This is the SINGLE source of truth for g-tier GPU capacity: it sets the
+    Karpenter gpu-g NodePool spec.limits AND the Kueue gpu-g flavor nominalQuota
+    (for both nvidia.com/gpu and vpc.amazonaws.com/efa, since EFA rides on GPU
+    nodes), so Kueue never admits more than Karpenter will provision.
 
     Recommended: 16
   EOT
   type        = number
 }
 
-variable "kueue_gpu_quota" {
+variable "gpu_p_capacity" {
   description = <<-EOT
-    Nominal GPU quota for the high-tier flavor (A100/H100/H200) in the inference ClusterQueue.
+    Max high-tier GPUs (A100/H100/H200) the cluster may provision — the P NodePool's cap.
+
+    Single source of truth for P-tier GPU capacity: sets the Karpenter gpu-p
+    NodePool spec.limits AND the Kueue gpu-multinode flavor nominalQuota.
 
     Recommended: 64
-  EOT
-  type        = number
-}
-
-variable "kueue_efa_quota" {
-  description = <<-EOT
-    Nominal EFA-interface quota (vpc.amazonaws.com/efa) for GPU flavors in the inference ClusterQueue.
-
-    Gates admission of workloads requesting EFA interfaces for multi-node NCCL.
-
-    Recommended: 32
   EOT
   type        = number
 }
@@ -417,18 +414,24 @@ variable "kueue_gpu_lending_limit" {
   type        = number
 }
 
-variable "kueue_cpu_quota" {
+variable "cpu_capacity" {
   description = <<-EOT
-    Nominal CPU quota for the inference ClusterQueue.
+    Max vCPUs the CPU NodePool may provision — the CPU pool's cap.
+
+    Single source of truth for CPU capacity: sets the Karpenter cpu NodePool
+    spec.limits AND the Kueue cpu-default flavor nominalQuota.
 
     Recommended: 768
   EOT
   type        = number
 }
 
-variable "kueue_memory_quota" {
+variable "memory_capacity" {
   description = <<-EOT
-    Nominal memory quota for the inference ClusterQueue.
+    Max memory the CPU NodePool may provision (e.g. 4Ti) — the CPU pool's cap.
+
+    Single source of truth for memory capacity: sets the Karpenter cpu NodePool
+    spec.limits AND the Kueue cpu-default flavor nominalQuota.
 
     Recommended: 4Ti
   EOT
@@ -452,12 +455,25 @@ variable "efa_device_plugin_chart_version" {
   description = <<-EOT
     The Helm chart version for the AWS EFA device plugin (eks-charts repo).
 
-    The chart's default image (EKS-managed regional ECR, same account as
-    vpc-cni) is used as-is — nodes already have pull access, so no repin or
-    vendoring. Chart version diverges from the image appVersion; the chart
-    handles that internally.
+    The image is vendored into our ECR from the EKS-managed regional registry
+    (inferred at apply from the vpc-cni add-on, never hardcoded) and the release
+    is repinned to it. Chart version diverges from the image appVersion — set
+    the image tag via efa_device_plugin_image_tag.
 
     Recommended: v0.5.29
+  EOT
+  type        = string
+}
+
+variable "efa_device_plugin_image_tag" {
+  description = <<-EOT
+    Image tag of the EFA device plugin to vendor (the chart's appVersion).
+
+    The chart version and the image appVersion diverge; this is the image tag
+    (not the chart version). It is vendored from the inferred EKS regional ECR
+    into our own ECR, and the release's image.tag is pinned to it.
+
+    Recommended: v0.5.20 (appVersion of chart v0.5.29)
   EOT
   type        = string
 }

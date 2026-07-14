@@ -64,6 +64,10 @@ spec:
     # nodes). Flavors tried in order: gpu-g (default) then gpu-multinode (opt-in
     # via nodeSelector inference/accelerator=nvidia-p). EFA quota gates admission
     # of workloads that request vpc.amazonaws.com/efa.
+    # EFA quota is DERIVED, not a separate dial: a pod requesting EFA also requests
+    # a GPU and a node advertises ≤1 EFA interface, so a flavor can never allocate
+    # more EFA than GPUs. Setting the EFA nominalQuota equal to that flavor's GPU
+    # quota makes GPU the single binding constraint (matching the NodePool GPU cap).
     - coveredResources: ["nvidia.com/gpu", "vpc.amazonaws.com/efa"]
       flavors:
         - name: gpu-g
@@ -71,7 +75,7 @@ spec:
             - name: nvidia.com/gpu
               nominalQuota: {{ .Values.gpuGQuota | quote }}
             - name: vpc.amazonaws.com/efa
-              nominalQuota: {{ .Values.efaQuota | quote }}
+              nominalQuota: {{ .Values.gpuGQuota | quote }}
         - name: gpu-multinode
           resources:
             - name: nvidia.com/gpu
@@ -80,7 +84,7 @@ spec:
               lendingLimit: {{ .Values.gpuLendingLimit | quote }}
               {{- end }}
             - name: vpc.amazonaws.com/efa
-              nominalQuota: {{ .Values.efaQuota | quote }}
+              nominalQuota: {{ .Values.gpuQuota | quote }}
     - coveredResources: ["cpu", "memory"]
       flavors:
         - name: cpu-default

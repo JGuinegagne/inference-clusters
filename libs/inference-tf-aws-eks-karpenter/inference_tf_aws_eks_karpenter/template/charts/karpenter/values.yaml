@@ -21,6 +21,10 @@ cpu:
   enabled: true
   instanceFamilies: ["c", "m", "r"] # instance CATEGORIES (karpenter.k8s.aws/instance-category)
   instanceGeneration: "5" # minimum generation, exclusive (operator Gt → gen > 5)
+  # -- Authoritative capacity cap (NodePool spec.limits). Kueue's cpu-default
+  #    flavor nominalQuota is derived from these SAME values in Terraform.
+  cpuLimit: "768"
+  memoryLimit: "4Ti"
 
 # -- Default GPU NodePool. On-demand, GPU taint. Selected by explicit instance
 #    FAMILY (not category+generation) because the "g" category also covers
@@ -30,6 +34,9 @@ cpu:
 #      g5   = A10G, g6 = L4, g6e = L40S, g7 = RTX PRO 4500, g7e = RTX PRO Server 6000
 gpuG:
   instanceFamilies: ["g5", "g6", "g6e", "g7", "g7e"]
+  # -- Authoritative GPU cap for the g-tier pool. Kueue's gpu-g flavor nominalQuota
+  #    (nvidia.com/gpu + vpc.amazonaws.com/efa) is derived from this SAME value.
+  gpuLimit: "16"
 
 # -- High-end GPU NodePool (p4d=A100x8, p5=H100x8, p5en=H200x8). On-demand. Gated
 #    (enabled) because a P node is expensive ($32-98/hr) and quota-constrained.
@@ -44,6 +51,9 @@ gpuG:
 gpuP:
   enabled: true
   instanceFamilies: ["p4d", "p5", "p5en"]
+  # -- Authoritative GPU cap for the high-tier P pool. Kueue's gpu-multinode flavor
+  #    nominalQuota is derived from this SAME value.
+  gpuLimit: "64"
   # -- ODCR seam: P on-demand capacity is scarce, so an org often runs P via a
   #    Capacity Reservation. Set an ODCR id to pin the pool to a reservation; empty =
   #    plain on-demand. (When P is reserved/always-on, see the shared-pool seam in the
