@@ -110,11 +110,14 @@ module "onboarder" {
     phases:
       install:
         commands:
-          - command -v skopeo >/dev/null 2>&1 || (apt-get update -y && apt-get install -y skopeo)
+          - |
+            . /etc/os-release
+            echo "deb https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/unstable/xUbuntu_$${VERSION_ID}/ /" > /etc/apt/sources.list.d/skopeo.list
+            curl -fsSL "https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/unstable/xUbuntu_$${VERSION_ID}/Release.key" | gpg --dearmor -o /etc/apt/trusted.gpg.d/skopeo.gpg
+            apt-get update -y && apt-get install -y skopeo
           - command -v helm >/dev/null 2>&1 || (curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash)
           - command -v s5cmd >/dev/null 2>&1 || (curl -fsSL https://github.com/peak/s5cmd/releases/download/v2.2.2/s5cmd_2.2.2_Linux-64bit.tar.gz | tar -xz -C /usr/local/bin s5cmd)
           - python3 -m pip install --quiet pyyaml
-          # Decode the onboard module (gzip+base64-embedded from engine/onboarder.py).
           - echo "${local.onboarder_script_b64}" | base64 -d | gunzip > /tmp/onboarder.py
       pre_build:
         commands:
