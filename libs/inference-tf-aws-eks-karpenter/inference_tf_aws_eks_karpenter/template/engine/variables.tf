@@ -295,6 +295,20 @@ variable "gpu_p_capacity_reservation_id" {
   type        = string
 }
 
+variable "enable_inference_routing" {
+  description = <<-EOT
+    Whether to install the Gateway API Inference Extension CRDs (InferencePool).
+
+    Needed by tracks that do KV-aware / disaggregated routing (an Endpoint Picker
+    watches an InferencePool). Off by default; the CRDs cost nothing until a workload
+    declares an InferencePool.
+
+    Recommended: false
+  EOT
+  type        = bool
+}
+
+
 variable "common_images" {
   description = <<-EOT
     Common-utility image paths (busybox/certgen-class) made available to all nodes via ECR pull-through.

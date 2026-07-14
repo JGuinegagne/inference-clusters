@@ -55,6 +55,12 @@ enable_container_insights           = true
 keda_chart_version = "2.20.1"
 kro_chart_version  = "0.9.2"
 
+# --- Inference-routing (opt-in, off by default) ---
+# Gateway API Inference Extension (InferencePool) CRDs, for KV-aware / disaggregated
+# routing. CRD-only; the Endpoint Picker + Envoy data plane ship in the workload
+# chart. See platform_inference_ext.tf.
+enable_inference_routing = false
+
 # --- Image supply: common-utility images via pull-through ---
 # Each entry MUST use a no-creds trusted upstream (public.ecr.aws/quay.io/registry.k8s.io).
 common_images = []

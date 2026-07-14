@@ -1,0 +1,6 @@
+# Injected from Terraform (platform_inference_ext.tf). This chart is CRD-only, so
+# there are no images or placement to configure — the only value is the content hash
+# used to trigger re-apply on edit (see main.tf chart_hashes).
+
+# -- sha256 of the chart's files; presence forces a helm upgrade when a CRD changes.
+chartContentHash: ""
