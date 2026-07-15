@@ -218,6 +218,27 @@ resource "aws_ecr_repository" "vendored" {
   tags = local.combined_tags
 }
 
+# Cross-account SOURCE read for the EFA image. The vendor job pulls the EFA image
+# from the EKS-managed regional ECR (a DIFFERENT account — the inferred registry).
+# ECR cross-account pull needs BOTH the source repo's resource policy (EKS grants
+# all accounts) AND an identity policy on the caller (the CodeBuild role). Its base
+# ECRPush policy is scoped to OUR vendored repos only, so grant read on the EKS
+# `eks/*` repos here. The account is wildcarded (arn ...:*:repository/eks/*) so this
+# works for the inferred registry in ANY region/partition — no hardcoded account.
+# Only attached when EFA is enabled (the only cross-account source we vendor).
+data "aws_iam_policy_document" "efa_source_pull" {
+  statement {
+    sid    = "PullEksManagedEfaImage"
+    effect = "Allow"
+    actions = [
+      "ecr:BatchGetImage",
+      "ecr:GetDownloadUrlForLayer",
+      "ecr:BatchCheckLayerAvailability",
+    ]
+    resources = ["arn:${data.aws_partition.current.partition}:ecr:${data.aws_region.current.id}:*:repository/eks/*"]
+  }
+}
+
 # --- CodeBuild vendoring job (upstream → our ECR, server-side) ---
 #
 # One project, driven per-image via start-build env overrides.
@@ -227,6 +248,11 @@ module "image_vendor" {
   project_name        = "${local.resource_name_prefix}-image-vendor"
   ecr_repository_arns = [for r in aws_ecr_repository.vendored : r.arn]
   combined_tags       = local.combined_tags
+
+  # Cross-account read of the EKS-managed EFA source image (see above). Gated on the
+  # plan-time-known enable_efa flag (attach_extra_policy must not depend on JSON).
+  attach_extra_policy = var.enable_efa
+  extra_policy_json   = data.aws_iam_policy_document.efa_source_pull.json
 
   # AWS_DEFAULT_REGION is a CodeBuild built-in — no need to pass it.
   environment_variables = {
