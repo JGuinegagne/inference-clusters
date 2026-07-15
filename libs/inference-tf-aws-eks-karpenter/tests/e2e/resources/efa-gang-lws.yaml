@@ -15,8 +15,8 @@
 #
 # Proves end-to-end: EFA device plugin advertises the resource → Kueue admits →
 # both pods land in one AZ with an EFA interface allocated. Uses g-tier (EFA on
-# g5/g6 large sizes), not p5 (~$98/hr, ICE-prone) — proves the EFA mechanism
-# (1 EFA/node), not the 32-rail p5 topology.
+# g5/g6 large sizes), not p5 (ICE-prone, ~100x the price) — proves the EFA
+# mechanism (1 EFA/node), not the 32-rail p5 topology.
 #
 # Substitutions: ${image}, ${namespace}, ${queue_name}
 apiVersion: leaderworkerset.x-k8s.io/v1
