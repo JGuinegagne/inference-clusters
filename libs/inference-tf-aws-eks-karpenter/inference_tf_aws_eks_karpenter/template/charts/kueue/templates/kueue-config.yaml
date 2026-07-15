@@ -97,14 +97,12 @@ spec:
     withinClusterQueue: LowerPriority
     reclaimWithinCohort: LowerPriority
 ---
-# Workload namespace — created here so the LocalQueue (and inference workloads)
-# have a home. The LocalQueue is namespaced; without this namespace the chart
-# apply fails (namespace not found) and no queue exists to admit workloads into.
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: {{ .Values.workloadNamespace }}
----
+# LocalQueue lives in the workload namespace. That namespace is NOT created by
+# this chart — it is a shared platform primitive owned by Terraform
+# (kubernetes_namespace.workload in platform_kueue.tf), which the release
+# depends_on. Owning it here would make `helm uninstall kueue-config` cascade-
+# delete the namespace and every running inference workload in it — a blast
+# radius wildly disproportionate to reapplying a queue config.
 apiVersion: kueue.x-k8s.io/v1beta2
 kind: LocalQueue
 metadata:

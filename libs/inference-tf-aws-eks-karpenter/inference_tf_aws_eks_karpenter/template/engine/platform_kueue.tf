@@ -18,6 +18,28 @@
 
 locals {
   kueue_namespace = "kueue-system"
+
+  # Where inference workloads (and their LocalQueue) live. A shared platform
+  # primitive, deliberately NOT owned by the kueue-config chart — see
+  # kubernetes_namespace.workload below.
+  workload_namespace = "inference"
+}
+
+# Workload namespace — a shared platform primitive owned by Terraform, NOT by the
+# kueue-config chart. If the chart created it, `helm uninstall kueue-config` (a
+# routine "reapply the queue config" step) would cascade-delete this namespace and
+# every running inference workload in it. Owning it here decouples the queue-config
+# lifecycle from workload lifetime: uninstalling/reapplying the chart never touches
+# the namespace. The LocalQueue (in the chart) depends on this via the release's
+# depends_on. Gated on enable_kueue like the rest of the queue stack.
+resource "kubernetes_namespace" "workload" {
+  count = var.enable_kueue ? 1 : 0
+
+  metadata {
+    name = local.workload_namespace
+  }
+
+  depends_on = [null_resource.cluster_addons]
 }
 
 resource "helm_release" "kueue" {
@@ -123,7 +145,9 @@ resource "helm_release" "kueue" {
 
 # --- Kueue queue configuration (charts/kueue) ---
 #
-# First-party local chart: ResourceFlavors, ClusterQueue, LocalQueue, namespace.
+# First-party local chart: ResourceFlavors, ClusterQueue, LocalQueue. The workload
+# namespace is NOT in the chart — it's kubernetes_namespace.workload (above), which
+# this release depends_on so the LocalQueue's namespace exists at apply time.
 # Installed as a helm_release (not kubernetes_manifest) because kubernetes_manifest
 # requires a live cluster connection at plan time.
 resource "helm_release" "kueue_config" {
@@ -146,9 +170,12 @@ resource "helm_release" "kueue_config" {
     { name = "gpuLendingLimit", value = tostring(var.kueue_gpu_lending_limit) },
     { name = "cpuQuota", value = tostring(var.cpu_capacity) },
     { name = "memoryQuota", value = var.memory_capacity },
-    { name = "workloadNamespace", value = "inference" },
+    { name = "workloadNamespace", value = local.workload_namespace },
     { name = "chartContentHash", value = local.chart_hashes["kueue"] },
   ]
 
-  depends_on = [helm_release.kueue]
+  depends_on = [
+    helm_release.kueue,
+    kubernetes_namespace.workload,
+  ]
 }

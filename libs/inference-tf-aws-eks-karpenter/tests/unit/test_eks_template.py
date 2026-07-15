@@ -1044,3 +1044,22 @@ def test_kueue_efa_quota_derived_from_gpu_quota() -> None:
     assert cfg.count("{{ .Values.gpuQuota | quote }}") == 2, (
         "gpu-multinode flavor: GPU and EFA quota both from gpuQuota"
     )
+
+
+def test_workload_namespace_decoupled_from_kueue_config_chart() -> None:
+    """The inference workload namespace MUST be owned by Terraform, not the kueue-config
+    chart — else `helm uninstall kueue-config` cascade-deletes the namespace and every
+    running inference workload in it. The chart must not declare a Namespace; Terraform
+    must own it and the release must depend on it."""
+    cfg = (TEMPLATE_PATH / "charts" / "kueue" / "templates" / "kueue-config.yaml").read_text()
+    assert "kind: Namespace" not in cfg, (
+        "kueue-config chart must NOT create the workload namespace (uninstall would delete workloads)"
+    )
+    kueue_tf = (ENGINE / "platform_kueue.tf").read_text()
+    assert 'resource "kubernetes_namespace" "workload"' in kueue_tf, (
+        "the workload namespace must be a Terraform-owned kubernetes_namespace"
+    )
+    block = _extract_resource_block(kueue_tf, "helm_release", "kueue_config")
+    assert "kubernetes_namespace.workload" in block, (
+        "kueue_config release must depend_on kubernetes_namespace.workload so the LocalQueue's namespace exists"
+    )

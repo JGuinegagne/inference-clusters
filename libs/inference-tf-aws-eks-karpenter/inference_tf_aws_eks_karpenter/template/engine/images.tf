@@ -137,13 +137,33 @@ data "kubernetes_resource" "aws_node" {
   # defers the read to apply, so eks_ecr_registry is unknown at plan — fine, it
   # only feeds a null_resource trigger (apply-time), never a for_each key.
   depends_on = [null_resource.cluster_addons]
+
+  # Guard the inferred registry BEFORE it flows into the vendoring source + the
+  # cross-account IAM grant. The derived string is only trustworthy if it is the
+  # canonical EKS regional ECR host for THIS region: <12-digit-account>.dkr.ecr.
+  # <region>.amazonaws.com. Reject anything else (a sidecar image at some other
+  # index, a non-ECR ref, a foreign region/partition) so we never vendor from —
+  # or grant pull on — an unexpected registry. Runs at apply (data source is
+  # deferred), failing the apply loudly rather than vendoring a surprise image.
+  lifecycle {
+    postcondition {
+      condition = can(regex(
+        "^[0-9]{12}\\.dkr\\.ecr\\.${data.aws_region.current.id}\\.amazonaws\\.com$",
+        split("/", one([for c in self.object.spec.template.spec.containers : c.image if c.name == "aws-node"]))[0]
+      ))
+      error_message = "Inferred EKS ECR registry from the aws-node DaemonSet is not the expected <account>.dkr.ecr.${data.aws_region.current.id}.amazonaws.com host; refusing to vendor the EFA image from it."
+    }
+  }
 }
 
 locals {
   # <account>.dkr.ecr.<region>.amazonaws.com — the EKS-managed regional registry,
-  # inferred from the vpc-cni image (see above). Empty when EFA is disabled (the
-  # data source isn't read then, and nothing references this).
-  eks_ecr_registry = var.enable_efa ? split("/", data.kubernetes_resource.aws_node[0].object.spec.template.spec.containers[0].image)[0] : ""
+  # inferred from the vpc-cni image (see above). We select the CNI container by
+  # NAME (aws-node), not index 0, so an injected sidecar at index 0 can't be
+  # mistaken for it; the postcondition on the data source has already asserted the
+  # derived host matches the canonical shape. Empty when EFA is disabled (the data
+  # source isn't read then, and nothing references this).
+  eks_ecr_registry = var.enable_efa ? split("/", one([for c in data.kubernetes_resource.aws_node[0].object.spec.template.spec.containers : c.image if c.name == "aws-node"]))[0] : ""
 
   # source (pinned upstream ref) → our ECR repo. Keys are stable (renaming one
   # replaces its repo). value.repo is the LOGICAL repo suffix; the actual ECR repo
