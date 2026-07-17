@@ -10,36 +10,19 @@
 #    Cluster-Autoscaler-only, karpenter#742/#2571).
 #
 # NOT TAS: TopologyAwareScheduling pre-computes topology fit over existing nodes,
-# which is meaningless on Karpenter JIT provisioning. EFA same-AZ co-location is
-# enforced via podAffinity in the workload spec instead.
+# which is meaningless on Karpenter JIT provisioning. AZ co-location for multi-node
+# NCCL/EFA is enforced by the LWS exclusive-topology annotation on the workload (see
+# charts/kueue/templates/kueue-config.yaml), not Kueue TAS.
+#
+# The workload namespace is a shared, ungated platform primitive owned by the engine
+# (kubernetes_namespace_v1.workload, platform_workloads.tf) — NOT this file — so it
+# outlives Kueue and toggling Kueue off never deletes the workloads in it.
 #
 # Placement: controller on the tainted system NG.
 # Images/chart: OCI on registry.k8s.io (pull-through, no vendoring).
 
 locals {
   kueue_namespace = "kueue-system"
-
-  # Where inference workloads (and their LocalQueue) live. A shared platform
-  # primitive, deliberately NOT owned by the kueue-config chart — see
-  # kubernetes_namespace.workload below.
-  workload_namespace = "inference"
-}
-
-# Workload namespace — a shared platform primitive owned by Terraform, NOT by the
-# kueue-config chart. If the chart created it, `helm uninstall kueue-config` (a
-# routine "reapply the queue config" step) would cascade-delete this namespace and
-# every running inference workload in it. Owning it here decouples the queue-config
-# lifecycle from workload lifetime: uninstalling/reapplying the chart never touches
-# the namespace. The LocalQueue (in the chart) depends on this via the release's
-# depends_on. Gated on enable_kueue like the rest of the queue stack.
-resource "kubernetes_namespace" "workload" {
-  count = var.enable_kueue ? 1 : 0
-
-  metadata {
-    name = local.workload_namespace
-  }
-
-  depends_on = [null_resource.cluster_addons]
 }
 
 resource "helm_release" "kueue" {
@@ -57,10 +40,14 @@ resource "helm_release" "kueue" {
     { name = "controllerManager.manager.image.repository", value = "${local.ecr_registry}/registry-k8s/kueue/kueue" },
     { name = "controllerManager.manager.image.tag", value = "v${var.kueue_chart_version}" },
 
+    # Two replicas so a leader failover (system-NG node drain) keeps a warm standby;
+    # the managerConfig sets leaderElect: true, so only one controller is active.
+    { name = "controllerManager.replicas", value = "2" },
+
     # NOTE: TopologyAwareScheduling is intentionally NOT enabled. TAS pre-computes
     # topology fit over existing nodes, which is meaningless on Karpenter's
-    # just-in-time provisioning (no nodes at admission time). EFA same-AZ
-    # co-location is enforced via podAffinity in the workload spec instead.
+    # just-in-time provisioning (no nodes at admission time). AZ co-location for
+    # multi-node NCCL/EFA is enforced by the LWS exclusive-topology annotation instead.
 
     # Prometheus ServiceMonitor (top-level toggle)
     { name = "enablePrometheus", value = "true" },
@@ -146,10 +133,10 @@ resource "helm_release" "kueue" {
 # --- Kueue queue configuration (charts/kueue) ---
 #
 # First-party local chart: ResourceFlavors, ClusterQueue, LocalQueue. The workload
-# namespace is NOT in the chart — it's kubernetes_namespace.workload (above), which
-# this release depends_on so the LocalQueue's namespace exists at apply time.
-# Installed as a helm_release (not kubernetes_manifest) because kubernetes_manifest
-# requires a live cluster connection at plan time.
+# namespace is NOT in the chart — it's kubernetes_namespace_v1.workload (engine-owned,
+# platform_workloads.tf), which this release depends_on so the LocalQueue's namespace
+# exists at apply time. Installed as a helm_release (not kubernetes_manifest) because
+# kubernetes_manifest requires a live cluster connection at plan time.
 resource "helm_release" "kueue_config" {
   count     = var.enable_kueue ? 1 : 0
   name      = "kueue-config"
@@ -170,12 +157,14 @@ resource "helm_release" "kueue_config" {
     { name = "gpuLendingLimit", value = tostring(var.kueue_gpu_lending_limit) },
     { name = "cpuQuota", value = tostring(var.cpu_capacity) },
     { name = "memoryQuota", value = var.memory_capacity },
-    { name = "workloadNamespace", value = local.workload_namespace },
+    { name = "workloadNamespace", value = var.workload_namespace },
+    # Offer the p-tier flavor only when the P node pool exists (else P workloads admit
+    # then hang Pending). P gang scheduling is NOT e2e-tested (scarce H100 capacity) — g is.
+    { name = "enableGpuPNodes", value = tostring(var.enable_gpu_p_nodepool) },
     { name = "chartContentHash", value = local.chart_hashes["kueue"] },
   ]
 
-  depends_on = [
-    helm_release.kueue,
-    kubernetes_namespace.workload,
-  ]
+  # The LocalQueue lives in the shared workload namespace, which the engine owns; it must
+  # exist first (and on destroy, this release is removed before the namespace is deleted).
+  depends_on = [helm_release.kueue, kubernetes_namespace_v1.workload]
 }

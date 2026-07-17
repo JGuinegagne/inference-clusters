@@ -10,16 +10,17 @@ test; the g-tier node-label assertion below is exactly what that test checked.
 Steps:
   1. Enable LWS + Kueue + EFA on the cluster
   2. Create a 2-pod LWS, each requesting nvidia.com/gpu: 1 + vpc.amazonaws.com/efa: 1,
-     with a podAffinity rule pinning both pods to the same AZ
+     with the LWS exclusive-topology annotation pinning both pods to the same AZ
   3. Assert: Kueue Workload reaches Admitted=True
   4. Assert: both pods reach Running on Karpenter g-tier nodes (inference/accelerator=nvidia-g)
   5. Assert: each pod has an EFA interface allocated
-  6. Assert: both pods land in the SAME AZ (podAffinity — EFA can't cross AZ)
+  6. Assert: both pods land in the SAME AZ (exclusive-topology — EFA can't cross AZ)
 
-Co-location is via podAffinity on topology.kubernetes.io/zone (a GA scheduler
-primitive that works with Karpenter JIT provisioning), NOT Kueue TAS — TAS
-pre-computes fit over existing nodes, which don't exist at admission time on
-Karpenter, and its ProvisioningRequest path is Cluster-Autoscaler-only.
+Co-location is via the LWS exclusive-topology annotation on topology.kubernetes.io/zone
+(the leader schedules first, then LWS stamps its zone as a nodeSelector on the workers —
+a Karpenter-native pattern that works scale-from-zero), NOT Kueue TAS. TAS pre-computes
+fit over existing nodes, which don't exist at admission time on Karpenter, and its
+ProvisioningRequest path is Cluster-Autoscaler-only.
 
 Why g-tier (not p5): Karpenter picks the smallest EFA-capable g instance (1 EFA
 interface, validated g5.8xlarge ~$2/hr) vs p5.48xlarge (32 EFA, ~$98/hr,
@@ -46,7 +47,7 @@ def test_kueue_efa_multinode_gang(
     e2e_deployment: EndToEndDeployment,
     kubernetes_cluster_login: None,
 ) -> None:
-    """EFA gang: Kueue admits, pods get EFA interfaces, podAffinity co-locates in one AZ."""
+    """EFA gang: Kueue admits, pods get EFA interfaces, exclusive-topology co-locates in one AZ."""
     # Enable LWS + Kueue + EFA (fixture already deployed the base cluster)
     e2e_deployment.update_override_value("enable_lws", True)
     e2e_deployment.update_override_value("enable_kueue", True)
@@ -132,7 +133,7 @@ def test_kueue_efa_multinode_gang(
         assert efa_limits == ["1", "1"], f"Both pods must have 1 EFA interface allocated, got: {efa_limits}"
 
         # Assert pods landed on Karpenter g-tier GPU nodes (the gpu-g flavor) AND
-        # podAffinity co-located both in the same AZ (EFA cannot cross AZ). The
+        # exclusive-topology co-located both in the same AZ (EFA cannot cross AZ). The
         # g-tier check is what the retired plain-gang test asserted — kept here so
         # this single test still covers the full flavor-injection path.
         nodes = (
@@ -175,7 +176,7 @@ def test_kueue_efa_multinode_gang(
             ).stdout.strip()
             zones.append(zone)
         assert zones[0] == zones[1] and zones[0], (
-            f"podAffinity must co-locate both pods in the same AZ for EFA, got zones: {zones}"
+            f"exclusive-topology must co-locate both pods in the same AZ for EFA, got zones: {zones}"
         )
 
     finally:

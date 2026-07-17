@@ -8,10 +8,11 @@
 # label in Karpenter's scheduling simulation ("label does not have known
 # values") and the group never provisions. Let Karpenter choose.
 #
-# Same-AZ co-location (EFA cannot cross AZ boundaries) is enforced via podAffinity
-# on topology.kubernetes.io/zone — a GA scheduler primitive that works with
-# Karpenter just-in-time provisioning (NOT Kueue TAS, which needs pre-existing
-# nodes and doesn't function on Karpenter scale-from-zero).
+# Same-AZ co-location (EFA cannot cross AZ boundaries) is enforced by the LWS
+# exclusive-topology annotation, NOT Kueue TAS: the leader schedules first
+# (Karpenter provisions a g-node in whatever AZ has capacity), then LWS stamps
+# that AZ as a nodeSelector on the workers. This works scale-from-zero; TAS would
+# deadlock (it needs g-nodes to exist before admission).
 #
 # Proves end-to-end: EFA device plugin advertises the resource → Kueue admits →
 # both pods land in one AZ with an EFA interface allocated. Uses g-tier (EFA on
@@ -26,6 +27,10 @@ metadata:
   namespace: ${namespace}
   labels:
     kueue.x-k8s.io/queue-name: ${queue_name}
+  annotations:
+    # AZ co-location for EFA: leader schedules first, workers inherit its zone as a
+    # nodeSelector. EFA interfaces cannot cross an AZ boundary.
+    leaderworkerset.sigs.k8s.io/exclusive-topology: topology.kubernetes.io/zone
 spec:
   replicas: 1
   leaderWorkerTemplate:
@@ -37,15 +42,6 @@ spec:
           app: efa-gang-e2e
           role: leader
       spec:
-        # Same-AZ co-location for EFA: every pod of this group must land in a
-        # zone where a pod labeled app=efa-gang-e2e already is (or will be).
-        affinity:
-          podAffinity:
-            requiredDuringSchedulingIgnoredDuringExecution:
-              - labelSelector:
-                  matchLabels:
-                    app: efa-gang-e2e
-                topologyKey: topology.kubernetes.io/zone
         terminationGracePeriodSeconds: 5
         tolerations:
           - key: nvidia.com/gpu
@@ -70,13 +66,6 @@ spec:
           app: efa-gang-e2e
           role: worker
       spec:
-        affinity:
-          podAffinity:
-            requiredDuringSchedulingIgnoredDuringExecution:
-              - labelSelector:
-                  matchLabels:
-                    app: efa-gang-e2e
-                topologyKey: topology.kubernetes.io/zone
         terminationGracePeriodSeconds: 5
         tolerations:
           - key: nvidia.com/gpu

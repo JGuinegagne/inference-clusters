@@ -1041,25 +1041,77 @@ def test_kueue_efa_quota_derived_from_gpu_quota() -> None:
     assert ".Values.efaQuota" not in cfg, "EFA must not use a standalone efaQuota value"
     # Both flavors set the EFA nominalQuota from the same key as their GPU nominalQuota.
     assert cfg.count("{{ .Values.gpuGQuota | quote }}") == 2, "gpu-g flavor: GPU and EFA quota both from gpuGQuota"
-    assert cfg.count("{{ .Values.gpuQuota | quote }}") == 2, (
-        "gpu-multinode flavor: GPU and EFA quota both from gpuQuota"
-    )
+    assert cfg.count("{{ .Values.gpuQuota | quote }}") == 2, "gpu-p flavor: GPU and EFA quota both from gpuQuota"
 
 
 def test_workload_namespace_decoupled_from_kueue_config_chart() -> None:
-    """The inference workload namespace MUST be owned by Terraform, not the kueue-config
-    chart — else `helm uninstall kueue-config` cascade-deletes the namespace and every
-    running inference workload in it. The chart must not declare a Namespace; Terraform
-    must own it and the release must depend on it."""
+    """The inference workload namespace MUST be owned by the engine (ungated), not the
+    kueue-config chart — else `helm uninstall kueue-config` cascade-deletes the namespace
+    and every running inference workload in it. The chart must not declare a Namespace;
+    the engine must own it (platform_workloads.tf) and the release must depend on it."""
     cfg = (TEMPLATE_PATH / "charts" / "kueue" / "templates" / "kueue-config.yaml").read_text()
     assert "kind: Namespace" not in cfg, (
         "kueue-config chart must NOT create the workload namespace (uninstall would delete workloads)"
     )
-    kueue_tf = (ENGINE / "platform_kueue.tf").read_text()
-    assert 'resource "kubernetes_namespace" "workload"' in kueue_tf, (
-        "the workload namespace must be a Terraform-owned kubernetes_namespace"
+    workloads_tf = (ENGINE / "platform_workloads.tf").read_text()
+    assert 'resource "kubernetes_namespace_v1" "workload"' in workloads_tf, (
+        "the workload namespace must be an engine-owned kubernetes_namespace_v1 in platform_workloads.tf"
     )
-    block = _extract_resource_block(kueue_tf, "helm_release", "kueue_config")
-    assert "kubernetes_namespace.workload" in block, (
-        "kueue_config release must depend_on kubernetes_namespace.workload so the LocalQueue's namespace exists"
+    # Ungated: it must NOT be gated on enable_kueue (it outlives optional operators).
+    ns_block = _extract_resource_block(workloads_tf, "kubernetes_namespace_v1", "workload")
+    assert "count" not in ns_block, "the workload namespace must be ungated (no count = var.enable_kueue)"
+    block = _extract_resource_block((ENGINE / "platform_kueue.tf").read_text(), "helm_release", "kueue_config")
+    assert "kubernetes_namespace_v1.workload" in block, (
+        "kueue_config release must depend_on kubernetes_namespace_v1.workload so the LocalQueue's namespace exists"
     )
+
+
+def test_cluster_autoscaler_discovery_and_scoped_role() -> None:
+    """CA discovery tags go on the ASG (MNG tags don't propagate), it balances node groups, and its
+    mutating autoscaling actions are tag-scoped to this cluster via Pod Identity."""
+    tf = (ENGINE / "platform_cluster_autoscaler.tf").read_text()
+    assert 'resource "aws_autoscaling_group_tag"' in tf and "module.node_group.autoscaling_group_name" in tf
+    assert "k8s.io/cluster-autoscaler/enabled" in tf
+    out = (ENGINE / "modules" / "node_group" / "outputs.tf").read_text()
+    assert "autoscaling_group_name" in out and "resources[0].autoscaling_groups[0].name" in out
+    ca = _extract_resource_block(tf, "helm_release", "cluster_autoscaler")
+    assert "balance-similar-node-groups" in ca
+    assoc = _extract_resource_block(tf, "aws_eks_pod_identity_association", "cluster_autoscaler")
+    assert "module.cluster_autoscaler_role.role_arn" in assoc
+    assert "autoscaling:SetDesiredCapacity" in tf and "autoscaling:TerminateInstanceInAutoScalingGroup" in tf
+    assert "k8s.io/cluster-autoscaler/" in tf, "mutating ASG actions must be tag-scoped to this cluster"
+
+
+def test_control_loop_operators_on_system_ng_and_ha() -> None:
+    """Leader-elected operators MUST pin to the tainted system NG AND run 2 replicas (warm standby).
+
+    Placement keeps control-loop pods off Karpenter nodes (where they'd block consolidation);
+    2 replicas keep the loop alive across a system-NG node drain. Only proves the .tf SETS the
+    keys — that the chart HONORS them is covered by the live test_platform_placement.
+    """
+    flat = [
+        ("platform_karpenter.tf", "karpenter", "inference/role", r'"replicas"\s*,?\s*value\s*=\s*"2"'),
+        (
+            "platform_cluster_autoscaler.tf",
+            "cluster_autoscaler",
+            "inference/role",
+            r'"replicaCount"\s*,?\s*value\s*=\s*"2"',
+        ),
+        ("platform_kro.tf", "kro", "inference/role", r'"deployment.replicaCount"\s*,?\s*value\s*=\s*"2"'),
+    ]
+    for tf_file, release, placement, replica_re in flat:
+        block = _extract_resource_block((ENGINE / tf_file).read_text(), "helm_release", release)
+        assert placement in block, f"{release} must pin to the system NG ({placement})"
+        assert re.search(replica_re, block), f"{release} must set 2 replicas"
+
+    # KEDA passes a nested values doc; operator + metrics-apiserver are HA, webhooks (stateless) are not.
+    keda = _extract_resource_block((ENGINE / "platform_keda.tf").read_text(), "helm_release", "keda")
+    assert "system_node_selector" in keda and "system_toleration" in keda
+    assert re.search(r"operator\s*=\s*\{\s*replicaCount\s*=\s*2", keda)
+    assert re.search(r"metricsServer\s*=\s*\{\s*replicaCount\s*=\s*2", keda)
+
+    # Prometheus: memory-limited singleton on the system NG (no HA — StatefulSet).
+    prom = _extract_resource_block(
+        (ENGINE / "platform_prometheus.tf").read_text(), "helm_release", "kube_prometheus_stack"
+    )
+    assert "system_node_selector" in prom and "prometheus_memory_limit" in prom
