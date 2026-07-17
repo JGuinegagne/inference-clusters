@@ -10,12 +10,13 @@
 # that gates it to EFA-capable instance types — do NOT remove that affinity or
 # this hostNetwork/system-node-critical DaemonSet would spray onto every node.
 #
-# Images: the upstream chart defaults to a PRIVATE cross-account ECR image
-# (602401143452.dkr.ecr.us-west-2.amazonaws.com/eks/aws-efa-k8s-device-plugin).
-# This won't pull in an endpoints-only VPC. We repin to the public.ecr.aws mirror
-# which resolves via our pull-through cache. NOTE: chart version (v0.5.29) and
-# image version (v0.5.20 = appVersion) diverge — we let the chart default the tag
-# from appVersion rather than pinning explicitly.
+# Images: the EFA plugin image lives ONLY on the EKS-managed regional ECR (it is
+# NOT on public.ecr.aws, so pull-through can't proxy it). The chart default
+# hardcodes us-west-2's account (602401143452), which breaks in other regions.
+# Instead we VENDOR it into our own ECR (images.tf) from the regional registry
+# INFERRED from the vpc-cni add-on — never a hardcoded account — and repin the
+# release to that private copy, so nodes pull it like any other platform image
+# over the endpoints-only VPC. Works in every commercial region automatically.
 #
 # Gated: only installed when enable_efa is true (not needed for single-node).
 
@@ -29,22 +30,23 @@ resource "helm_release" "efa_device_plugin" {
   namespace  = "kube-system"
 
   set = [
-    # Repin image repository to pull-through URI. Let the chart default tag from
-    # appVersion (v0.5.20) — chart version (v0.5.29) != image version.
+    # Repin to the vendored private-ECR copy (see images.tf) — the source registry
+    # is inferred from vpc-cni, not hardcoded. The chart otherwise defaults to
+    # us-west-2's EKS account, which fails in other regions.
     {
       name  = "image.repository"
-      value = "${local.ecr_registry}/ecr-public/eks/aws-efa-k8s-device-plugin"
+      value = aws_ecr_repository.vendored["efa_device_plugin"].repository_url
     },
-    # DaemonSet must tolerate all taints so it lands on GPU nodes.
-    # The chart's built-in nodeAffinity on supportedInstanceLabels already limits
-    # it to EFA-capable instance types (p4d, p5, trn1, etc.) — no extra
-    # nodeSelector needed.
+    { name = "image.tag", value = local.vendored_tag },
+    # DaemonSet must tolerate all taints so it lands on GPU nodes (where the EFA
+    # interfaces physically exist). The chart's built-in nodeAffinity on
+    # supportedInstanceLabels limits it to EFA-capable types — no nodeSelector.
     { name = "tolerations[0].operator", value = "Exists" },
   ]
 
   depends_on = [
     null_resource.cluster_addons,
-    null_resource.pullthrough_ready,
+    null_resource.image_vendor,
     module.node_group,
     helm_release.karpenter,
   ]

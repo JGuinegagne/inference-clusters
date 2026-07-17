@@ -22,7 +22,8 @@ admin_role_names = []
 admin_user_names = []
 
 # --- Karpenter / platform charts ---
-metrics_server_chart_version = "3.12.2"
+metrics_server_chart_version     = "3.12.2"
+cluster_autoscaler_chart_version = "9.58.0"
 
 # --- GPU serving path: always on (GPUs are mandatory for inference) ---
 nvidia_device_plugin_version       = "v0.17.1"
@@ -59,18 +60,25 @@ kro_chart_version  = "0.9.2"
 # Each entry MUST use a no-creds trusted upstream (public.ecr.aws/quay.io/registry.k8s.io).
 common_images = []
 
+# --- Cluster capacity caps (single source of truth) ---
+# Each sets the Karpenter NodePool spec.limits AND the derived Kueue flavor
+# nominalQuota, so admission (Kueue) can never exceed provisioning (Karpenter).
+gpu_g_capacity  = 16    # g-tier GPUs (A10G/L4); also caps the g-flavor EFA quota
+gpu_p_capacity  = 64    # high-tier GPUs (A100/H100/H200)
+cpu_capacity    = 768   # vCPUs (CPU pool)
+memory_capacity = "4Ti" # memory (CPU pool)
+
 # --- Multi-node inference: LWS + Kueue + EFA ---
 # All gated (false by default). Enable for multi-node tracks.
-enable_lws     = false
+enable_lws        = false
 lws_chart_version = "0.9.0"
 
 enable_kueue             = false
 kueue_chart_version      = "0.18.2"
 kueue_cluster_queue_name = "inference-gpu"
-kueue_gpu_quota          = 64
 kueue_gpu_lending_limit  = 0
-kueue_cpu_quota          = 768
-kueue_memory_quota       = "4Ti"
+workload_namespace       = "inference"
 
-enable_efa                    = false
+enable_efa                      = false
 efa_device_plugin_chart_version = "v0.5.29"
+efa_device_plugin_image_tag     = "v0.5.20" # chart v0.5.29 appVersion; vendored into ECR

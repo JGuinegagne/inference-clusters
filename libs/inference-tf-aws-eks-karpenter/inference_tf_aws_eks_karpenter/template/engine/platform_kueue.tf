@@ -1,11 +1,22 @@
 # === Kueue — admission control + gang scheduling for multi-node inference ===
 #
 # Kueue gates LWS workloads behind quota — the entire group is admitted
-# atomically or stays suspended. Three features are always-on when enabled:
+# atomically or stays suspended. Two features are on when enabled:
 #
-# 1. TopologyAwareScheduling (TAS): guarantees AZ co-location for EFA.
-# 2. Prometheus ServiceMonitor: queue health visibility.
-# 3. waitForPodsReady: evicts workload on partial provisioning failure.
+# 1. Prometheus ServiceMonitor: queue health visibility.
+# 2. waitForPodsReady: evicts workload on partial provisioning failure — the
+#    reactive backstop for the Karpenter capacity pre-check gap (Karpenter can't
+#    confirm hardware exists before Kueue admits; ProvisioningRequest is
+#    Cluster-Autoscaler-only, karpenter#742/#2571).
+#
+# NOT TAS: TopologyAwareScheduling pre-computes topology fit over existing nodes,
+# which is meaningless on Karpenter JIT provisioning. AZ co-location for multi-node
+# NCCL/EFA is enforced by the LWS exclusive-topology annotation on the workload (see
+# charts/kueue/templates/kueue-config.yaml), not Kueue TAS.
+#
+# The workload namespace is a shared, ungated platform primitive owned by the engine
+# (kubernetes_namespace_v1.workload, platform_workloads.tf) — NOT this file — so it
+# outlives Kueue and toggling Kueue off never deletes the workloads in it.
 #
 # Placement: controller on the tainted system NG.
 # Images/chart: OCI on registry.k8s.io (pull-through, no vendoring).
@@ -29,9 +40,14 @@ resource "helm_release" "kueue" {
     { name = "controllerManager.manager.image.repository", value = "${local.ecr_registry}/registry-k8s/kueue/kueue" },
     { name = "controllerManager.manager.image.tag", value = "v${var.kueue_chart_version}" },
 
-    # TAS feature gate (list format: the chart renders --feature-gates= from this)
-    { name = "controllerManager.featureGates[0].name", value = "TopologyAwareScheduling" },
-    { name = "controllerManager.featureGates[0].enabled", value = "true" },
+    # Two replicas so a leader failover (system-NG node drain) keeps a warm standby;
+    # the managerConfig sets leaderElect: true, so only one controller is active.
+    { name = "controllerManager.replicas", value = "2" },
+
+    # NOTE: TopologyAwareScheduling is intentionally NOT enabled. TAS pre-computes
+    # topology fit over existing nodes, which is meaningless on Karpenter's
+    # just-in-time provisioning (no nodes at admission time). AZ co-location for
+    # multi-node NCCL/EFA is enforced by the LWS exclusive-topology annotation instead.
 
     # Prometheus ServiceMonitor (top-level toggle)
     { name = "enablePrometheus", value = "true" },
@@ -116,25 +132,39 @@ resource "helm_release" "kueue" {
 
 # --- Kueue queue configuration (charts/kueue) ---
 #
-# First-party local chart: Topology, ResourceFlavor, ClusterQueue, LocalQueue.
-# Installed as a helm_release (not kubernetes_manifest) because kubernetes_manifest
-# requires a live cluster connection at plan time.
+# First-party local chart: ResourceFlavors, ClusterQueue, LocalQueue. The workload
+# namespace is NOT in the chart — it's kubernetes_namespace_v1.workload (engine-owned,
+# platform_workloads.tf), which this release depends_on so the LocalQueue's namespace
+# exists at apply time. Installed as a helm_release (not kubernetes_manifest) because
+# kubernetes_manifest requires a live cluster connection at plan time.
 resource "helm_release" "kueue_config" {
   count     = var.enable_kueue ? 1 : 0
   name      = "kueue-config"
   chart     = "${path.module}/../charts/kueue"
   namespace = local.kueue_namespace
 
+  # Kueue nominalQuota is DERIVED from the capacity caps that also set the Karpenter
+  # NodePool spec.limits (platform_karpenter.tf) — one source of truth per tier, so
+  # Kueue never admits more GPUs/CPU/memory than Karpenter is allowed to provision.
+  # EFA quota is not a separate dial: a pod requesting EFA also requests a GPU and a
+  # node carries ≤1 EFA, so per-flavor EFA demand ≤ that flavor's GPU quota — the
+  # chart sets the g-flavor EFA nominalQuota equal to gpuGQuota.
   set = [
     { name = "clusterQueueName", value = var.kueue_cluster_queue_name },
     { name = "cohortName", value = "gpu-cohort" },
-    { name = "gpuQuota", value = tostring(var.kueue_gpu_quota) },
+    { name = "gpuGQuota", value = tostring(var.gpu_g_capacity) },
+    { name = "gpuQuota", value = tostring(var.gpu_p_capacity) },
     { name = "gpuLendingLimit", value = tostring(var.kueue_gpu_lending_limit) },
-    { name = "cpuQuota", value = tostring(var.kueue_cpu_quota) },
-    { name = "memoryQuota", value = var.kueue_memory_quota },
-    { name = "workloadNamespace", value = "inference" },
+    { name = "cpuQuota", value = tostring(var.cpu_capacity) },
+    { name = "memoryQuota", value = var.memory_capacity },
+    { name = "workloadNamespace", value = var.workload_namespace },
+    # Offer the p-tier flavor only when the P node pool exists (else P workloads admit
+    # then hang Pending). P gang scheduling is NOT e2e-tested (scarce H100 capacity) — g is.
+    { name = "enableGpuPNodes", value = tostring(var.enable_gpu_p_nodepool) },
     { name = "chartContentHash", value = local.chart_hashes["kueue"] },
   ]
 
-  depends_on = [helm_release.kueue]
+  # The LocalQueue lives in the shared workload namespace, which the engine owns; it must
+  # exist first (and on destroy, this release is removed before the namespace is deleted).
+  depends_on = [helm_release.kueue, kubernetes_namespace_v1.workload]
 }

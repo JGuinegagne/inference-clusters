@@ -1,30 +1,63 @@
-apiVersion: kueue.x-k8s.io/v1beta2
-kind: Topology
-metadata:
-  name: default
-spec:
-  levels:
-    - nodeLabel: topology.kubernetes.io/zone
-    - nodeLabel: kubernetes.io/hostname
----
+# Kueue queue configuration: one ResourceFlavor per tier + a single ClusterQueue.
+#
+# The workload namespace ({{ .Values.workloadNamespace }}) is created by the ENGINE
+# (kubernetes_namespace_v1.workload, platform_workloads.tf), NOT this chart — it is
+# shared, ungated infra that must outlive Kueue. The LocalQueue below only references
+# it. Owning it here would make `helm uninstall kueue-config` cascade-delete the
+# namespace and every running inference workload in it.
+#
+# NO TopologyAwareScheduling. TAS derives admissible AZ domains from nodes that ALREADY
+# exist at admission time — which deadlocks a scale-from-zero GPU pool (no g-nodes yet →
+# no zone domains → never admitted → Karpenter never provisions → still no nodes). AZ
+# co-location for multi-node NCCL/EFA is instead enforced at provision time by the LWS
+# `exclusive-topology` annotation (leader schedules first, workers inherit its zone as a
+# nodeSelector) — the Karpenter-native pattern. Capacity guarantees for scarce p-tier
+# come from ODCR / Capacity Blocks (gpu_p_capacity_reservation_id), not a software
+# pre-check. waitForPodsReady is the reactive backstop.
+
+# --- g-tier GPU flavor (A10G/L4): plentiful, ICE-free, the tested default ---
 apiVersion: kueue.x-k8s.io/v1beta2
 kind: ResourceFlavor
 metadata:
-  name: gpu-multinode
+  name: gpu-g
 spec:
+  # Target the g-tier (always-on, cheaper) GPU pool. It taints only nvidia.com/gpu.
   nodeLabels:
-    inference/accelerator: nvidia-p
-  topologyName: default
+    inference/accelerator: nvidia-g
   tolerations:
     - key: nvidia.com/gpu
       operator: Exists
+      effect: NoSchedule
+---
+# --- p-tier GPU flavor (A100/H100/H200): gated, expensive. gpu-p NodePool carries TWO
+# taints (nodepools.yaml) — shared GPU + distinct high-tier — so BOTH tolerations are
+# required or Karpenter refuses to provision. Workloads opt in via nodeSelector
+# inference/accelerator=nvidia-p, which makes the g flavor incompatible so admission
+# falls to this one. NOT e2e-tested (P capacity is scarce/ICE-prone; g is the tested
+# path), but the flavor MUST exist so Kueue can reach the P pool at all. ---
+apiVersion: kueue.x-k8s.io/v1beta2
+kind: ResourceFlavor
+metadata:
+  name: gpu-p
+spec:
+  nodeLabels:
+    inference/accelerator: nvidia-p
+  tolerations:
+    - key: nvidia.com/gpu
+      operator: Exists
+      effect: NoSchedule
+    - key: inference/gpu-tier
+      operator: Equal
+      value: "high"
       effect: NoSchedule
 ---
 apiVersion: kueue.x-k8s.io/v1beta2
 kind: ResourceFlavor
 metadata:
   name: cpu-default
-spec: {}
+spec:
+  # Match-anything CPU flavor: no nodeLabels (any node).
+  {}
 ---
 apiVersion: kueue.x-k8s.io/v1beta2
 kind: ClusterQueue
@@ -34,15 +67,35 @@ spec:
   namespaceSelector: {}
   cohortName: {{ .Values.cohortName }}
   resourceGroups:
-    - coveredResources: ["nvidia.com/gpu"]
+    # GPU + EFA share a resource group (both are node-level resources on GPU nodes).
+    # Flavors are tried in order: gpu-g first (cost-safe default), then gpu-p (only
+    # present when the p node pool is enabled — else a P workload would admit then hang
+    # Pending). A pod reaches p by nodeSelecting inference/accelerator=nvidia-p, which
+    # makes the g flavor incompatible.
+    #
+    # EFA quota is DERIVED, not a separate dial: a pod requesting EFA also requests a GPU
+    # and a node advertises ≤1 EFA interface, so a flavor can never allocate more EFA than
+    # GPUs. Setting the EFA nominalQuota equal to that flavor's GPU quota makes GPU the
+    # single binding constraint (matching the NodePool GPU cap).
+    - coveredResources: ["nvidia.com/gpu", "vpc.amazonaws.com/efa"]
       flavors:
-        - name: gpu-multinode
+        - name: gpu-g
+          resources:
+            - name: nvidia.com/gpu
+              nominalQuota: {{ .Values.gpuGQuota | quote }}
+            - name: vpc.amazonaws.com/efa
+              nominalQuota: {{ .Values.gpuGQuota | quote }}
+        {{- if .Values.enableGpuPNodes }}
+        - name: gpu-p
           resources:
             - name: nvidia.com/gpu
               nominalQuota: {{ .Values.gpuQuota | quote }}
               {{- if .Values.gpuLendingLimit }}
               lendingLimit: {{ .Values.gpuLendingLimit | quote }}
               {{- end }}
+            - name: vpc.amazonaws.com/efa
+              nominalQuota: {{ .Values.gpuQuota | quote }}
+        {{- end }}
     - coveredResources: ["cpu", "memory"]
       flavors:
         - name: cpu-default
@@ -55,6 +108,11 @@ spec:
     withinClusterQueue: LowerPriority
     reclaimWithinCohort: LowerPriority
 ---
+# LocalQueue lives in the workload namespace, which the ENGINE owns
+# (kubernetes_namespace_v1.workload, platform_workloads.tf) — the release depends_on it,
+# so the namespace exists first (and on destroy, this release is removed before the
+# namespace is deleted). NOT created here: owning it would make `helm uninstall
+# kueue-config` cascade-delete the namespace and every running inference workload in it.
 apiVersion: kueue.x-k8s.io/v1beta2
 kind: LocalQueue
 metadata:
