@@ -21,6 +21,15 @@ InferencePool.
 
 ## Updating
 
-Re-fetch from the release matching the EPP image the workload chart uses:
-`https://github.com/kubernetes-sigs/gateway-api-inference-extension/releases/download/<tag>/manifests.yaml`
-Keep the pin in sync with that EPP image tag.
+Run the re-vendor recipe from the repo root — it fetches the pinned upstream
+release and regenerates `crds.yaml` (never hand-edit it):
+
+```
+just update-inference-extension-crds                 # uses the pinned version
+just update-inference-extension-crds version=v1.1.0  # bump to a new release
+```
+
+The default pin lives in the `justfile` (`inference-extension-crd-version`). Keep
+it in sync with the EPP image tag the workload chart (inference-charts) uses —
+older releases (v0.5.x) only shipped the alpha group and won't match the chart's
+`inference.networking.k8s.io/v1` InferencePool.
