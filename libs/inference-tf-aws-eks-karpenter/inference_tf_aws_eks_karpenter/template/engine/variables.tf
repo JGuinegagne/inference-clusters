@@ -151,6 +151,17 @@ variable "metrics_server_chart_version" {
   type        = string
 }
 
+variable "cluster_autoscaler_chart_version" {
+  description = <<-EOT
+    The Helm chart version for the Kubernetes Cluster Autoscaler (system MNG scaling).
+
+    The image tag is derived from kubernetes_version (v<minor>.0), not this chart version.
+
+    Recommended: 9.58.0
+  EOT
+  type        = string
+}
+
 variable "nvidia_device_plugin_version" {
   description = <<-EOT
     The nvcr.io/nvidia/k8s-device-plugin image tag to vendor into ECR.
@@ -329,4 +340,179 @@ variable "common_images" {
     ])
     error_message = "Every common_images entry must start with a trusted no-credentials registry host: public.ecr.aws/, quay.io/, or registry.k8s.io/ (Docker Hub/GHCR require credentials and are not supported; use the ECR Public mirror instead)."
   }
+}
+
+# === Multi-node inference (LWS + Kueue + EFA) ===
+
+variable "enable_lws" {
+  description = <<-EOT
+    Install the LeaderWorkerSet controller for multi-node pod group lifecycle.
+
+    Required for multi-node inference — manages leader/worker templates with
+    RecreateGroupOnPodRestart semantics (NCCL groups are not recoverable).
+
+    Recommended: true (for multi-node tracks)
+  EOT
+  type        = bool
+}
+
+variable "lws_chart_version" {
+  description = <<-EOT
+    The Helm chart version for LeaderWorkerSet (oci://registry.k8s.io/lws/charts/lws).
+
+    Published to registry.k8s.io (pull-through, no vendoring).
+
+    Recommended: 0.9.0
+  EOT
+  type        = string
+}
+
+variable "enable_kueue" {
+  description = <<-EOT
+    Install Kueue for admission control and gang scheduling of LWS workloads.
+
+    Kueue gates workloads behind GPU quota — the entire LWS group is admitted
+    atomically or stays suspended. Includes a Prometheus ServiceMonitor and
+    waitForPodsReady (evicts + requeues on partial provisioning). AZ co-location for
+    multi-node NCCL/EFA is enforced by the LWS exclusive-topology annotation, not Kueue TAS.
+
+    Requires enable_lws = true (LWS CRD must exist for Kueue's integration).
+
+    Recommended: true (for multi-node tracks)
+  EOT
+  type        = bool
+}
+
+variable "kueue_chart_version" {
+  description = <<-EOT
+    The Helm chart version for Kueue (oci://registry.k8s.io/kueue/charts/kueue).
+
+    Published to registry.k8s.io (pull-through, no vendoring).
+
+    Recommended: 0.18.2
+  EOT
+  type        = string
+}
+
+variable "workload_namespace" {
+  description = <<-EOT
+    The shared Kubernetes namespace where inference workloads run.
+
+    Created unconditionally by the engine and referenced by platform components (the Kueue
+    LocalQueue, and any future shared RBAC/quota). Owned here so it outlives optional
+    operators — toggling one off never deletes the namespace or the workloads in it.
+
+    Recommended: inference
+  EOT
+  type        = string
+}
+
+variable "kueue_cluster_queue_name" {
+  description = <<-EOT
+    Name of the ClusterQueue for GPU inference workloads.
+
+    Recommended: inference-gpu
+  EOT
+  type        = string
+}
+
+variable "gpu_g_capacity" {
+  description = <<-EOT
+    Max g-tier GPUs (A10G/L4) the cluster may provision — the g NodePool's cap.
+
+    This is the SINGLE source of truth for g-tier GPU capacity: it sets the
+    Karpenter gpu-g NodePool spec.limits AND the Kueue gpu-g flavor nominalQuota
+    (for both nvidia.com/gpu and vpc.amazonaws.com/efa, since EFA rides on GPU
+    nodes), so Kueue never admits more than Karpenter will provision.
+
+    Recommended: 16
+  EOT
+  type        = number
+}
+
+variable "gpu_p_capacity" {
+  description = <<-EOT
+    Max high-tier GPUs (A100/H100/H200) the cluster may provision — the P NodePool's cap.
+
+    Single source of truth for P-tier GPU capacity: sets the Karpenter gpu-p
+    NodePool spec.limits AND the Kueue gpu-multinode flavor nominalQuota.
+
+    Recommended: 64
+  EOT
+  type        = number
+}
+
+variable "kueue_gpu_lending_limit" {
+  description = <<-EOT
+    Maximum GPUs lent to other queues in the cohort when idle.
+
+    0 = no lending (all GPUs reserved for inference).
+
+    Recommended: 0
+  EOT
+  type        = number
+}
+
+variable "cpu_capacity" {
+  description = <<-EOT
+    Max vCPUs the CPU NodePool may provision — the CPU pool's cap.
+
+    Single source of truth for CPU capacity: sets the Karpenter cpu NodePool
+    spec.limits AND the Kueue cpu-default flavor nominalQuota.
+
+    Recommended: 768
+  EOT
+  type        = number
+}
+
+variable "memory_capacity" {
+  description = <<-EOT
+    Max memory the CPU NodePool may provision (e.g. 4Ti) — the CPU pool's cap.
+
+    Single source of truth for memory capacity: sets the Karpenter cpu NodePool
+    spec.limits AND the Kueue cpu-default flavor nominalQuota.
+
+    Recommended: 4Ti
+  EOT
+  type        = string
+}
+
+
+variable "enable_efa" {
+  description = <<-EOT
+    Install the AWS EFA device plugin for multi-node NCCL networking.
+
+    Required for multi-node inference with cross-node TP. Advertises EFA
+    interfaces as allocatable resources on GPU nodes.
+
+    Recommended: true (for multi-node tracks on p4d/p5/p5en)
+  EOT
+  type        = bool
+}
+
+variable "efa_device_plugin_chart_version" {
+  description = <<-EOT
+    The Helm chart version for the AWS EFA device plugin (eks-charts repo).
+
+    The image is vendored into our ECR from the EKS-managed regional registry
+    (inferred at apply from the vpc-cni add-on, never hardcoded) and the release
+    is repinned to it. Chart version diverges from the image appVersion — set
+    the image tag via efa_device_plugin_image_tag.
+
+    Recommended: v0.5.29
+  EOT
+  type        = string
+}
+
+variable "efa_device_plugin_image_tag" {
+  description = <<-EOT
+    Image tag of the EFA device plugin to vendor (the chart's appVersion).
+
+    The chart version and the image appVersion diverge; this is the image tag
+    (not the chart version). It is vendored from the inferred EKS regional ECR
+    into our own ECR, and the release's image.tag is pinned to it.
+
+    Recommended: v0.5.20 (appVersion of chart v0.5.29)
+  EOT
+  type        = string
 }

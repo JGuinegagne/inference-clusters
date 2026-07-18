@@ -39,6 +39,44 @@ def _replicas(release: str) -> int:
     return int(r.stdout.strip() or "0")
 
 
+def _wait_settled_at_zero(release: str, *, stable_reads: int = 3, interval_s: int = 5, timeout_s: int = 180) -> None:
+    """Block until the ScaledObject holds vLLM at its 0 floor, then assert it's there.
+
+    Replaces a blind sleep: the at-rest state is established by an OBSERVED condition,
+    not a fixed guess at KEDA's reconcile latency. Two gates:
+      1. `kubectl wait --for=condition=Ready` — KEDA has reconciled the ScaledObject and
+         created the backing HPA (until then replicas may still read the install-time 0
+         for the wrong reason: nothing is managing it yet).
+      2. a stable window — `stable_reads` consecutive zero reads, so a still-settling
+         count that momentarily reads 0 does not pass prematurely.
+    """
+    ready = h.kubectl(
+        "wait",
+        "--for=condition=Ready",
+        f"scaledobject/{release}",
+        "-n",
+        h.NAMESPACE,
+        f"--timeout={timeout_s}s",
+        check=False,
+    )
+    assert ready.returncode == 0, f"ScaledObject '{release}' never became Ready:\n{ready.stderr}"
+
+    deadline = time.monotonic() + timeout_s
+    consecutive = 0
+    while time.monotonic() < deadline:
+        if _replicas(release) == 0:
+            consecutive += 1
+            if consecutive >= stable_reads:
+                return
+        else:
+            consecutive = 0
+        time.sleep(interval_s)
+    raise AssertionError(
+        f"vLLM did not settle at 0 replicas ({stable_reads} stable reads) within {timeout_s}s "
+        "before any request drove the router metric"
+    )
+
+
 @pytest.mark.full_deployment
 def test_keda_scales_vllm_from_zero_via_router(e2e_deployment: EndToEndDeployment) -> None:
     e2e_deployment.ensure_deployed()
@@ -71,9 +109,9 @@ def test_keda_scales_vllm_from_zero_via_router(e2e_deployment: EndToEndDeploymen
         # 3. Apply the ScaledObject (minReplicaCount=0, scales on router_inflight_requests).
         h.apply_resource("vllm-scaledobject.yaml", target=RELEASE)
 
-        # 3a. At rest (no requests): KEDA holds vLLM at 0, no serving pod.
-        time.sleep(60)  # let KEDA reconcile the ScaledObject to its 0 floor
-        assert _replicas(RELEASE) == 0, "vLLM must sit at 0 replicas before any request drives the router metric"
+        # 3a. At rest (no requests): KEDA holds vLLM at 0, no serving pod. Wait on the
+        #     ScaledObject reconciling + a stable-at-zero window rather than a blind sleep.
+        _wait_settled_at_zero(RELEASE)
 
         # 4. Fire a request through the router (soft-fail + retry; the router holds it and
         #    retries the backend through the cold start). Returns immediately — the client

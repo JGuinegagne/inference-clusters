@@ -1,0 +1,8 @@
+schema_version: 2
+# E2E config for multi-node platform tests (Kueue + LWS + EFA).
+# Enables the gang scheduling stack; no GPUs needed for the CPU-only gang test.
+required: {}
+overrides:
+  enable_lws: true
+  enable_kueue: true
+  enable_efa: false  # no EFA-capable instances in this test (CPU-only gang scheduling)

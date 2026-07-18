@@ -1,0 +1,5 @@
+schema_version: 2
+# Base config WITHOUT multinode operators. Used for the mutating test which
+# adds enable_lws + enable_kueue on top of a running cluster.
+required: {}
+overrides: {}

@@ -321,17 +321,14 @@ class Runner:
         return ["--tags", *[f"Key={k},Value={v}" for k, v in tags.items()]]
 
     def copy_image(self, src_ref: str, dst_digest_ref: str, dst_tag_ref: str) -> None:
-        """Copy the full (multi-arch) manifest by digest; fall back to the tag ref."""
+        """Copy the full manifest (multi-arch) with digest preservation enforced."""
         if self.dry_run:
             return
-        base = ["skopeo", "copy", "--all", *self.skopeo_extra]
-        first = subprocess.run(
-            [*base, f"docker://{src_ref}", f"docker://{dst_digest_ref}"], capture_output=True, text=True
+        subprocess.run(
+            ["skopeo", "copy", "--all", "--preserve-digests", *self.skopeo_extra,
+             f"docker://{src_ref}", f"docker://{dst_tag_ref}"],
+            check=True, capture_output=True, text=True,
         )
-        if first.returncode != 0:
-            subprocess.run(
-                [*base, f"docker://{src_ref}", f"docker://{dst_tag_ref}"], check=True, capture_output=True, text=True
-            )
 
     def ingest_weights(self, source: str, dst_uri: str, name: str) -> None:
         """Rehost a weight source into our S3.

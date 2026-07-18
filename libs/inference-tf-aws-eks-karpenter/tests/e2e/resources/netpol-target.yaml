@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: netpol-target
+  namespace: ${TARGET_NS}
+  labels:
+    app: netpol-target
+spec:
+  restartPolicy: Never
+  containers:
+    - name: httpd
+      # busybox via ECR pull-through — nodes are air-gapped, a public.ecr.aws ref can't be pulled.
+      image: ${TARGET_IMAGE}
+      command: ["sh", "-c", "mkdir -p /www && echo ok > /www/index.html && httpd -f -p 8080 -h /www"]
+      ports:
+        - containerPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: netpol-target
+  namespace: ${TARGET_NS}
+spec:
+  selector:
+    app: netpol-target
+  ports:
+    - port: 8080
+      targetPort: 8080

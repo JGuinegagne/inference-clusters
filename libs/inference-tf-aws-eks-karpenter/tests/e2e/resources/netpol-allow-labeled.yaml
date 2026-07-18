@@ -1,0 +1,19 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: netpol-target-ingress
+  namespace: ${TARGET_NS}
+spec:
+  # Selects the target Service's backing pod. An empty ingress allow-list would be
+  # pure default-deny; the single podSelector rule below carves out one allowed source
+  # so the test can prove BOTH enforcement directions (deny + allow) with one policy.
+  podSelector:
+    matchLabels:
+      app: netpol-target
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              netpol-role: allowed
