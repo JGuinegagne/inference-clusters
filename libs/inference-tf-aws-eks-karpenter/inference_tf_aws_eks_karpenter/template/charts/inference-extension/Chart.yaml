@@ -1,0 +1,10 @@
+apiVersion: v2
+name: inference-extension-crds
+# SemVer spelling of the template version 0.1.0rc1 (Helm requires SemVer).
+# Kept in sync with the template version.
+version: 0.1.0-rc1
+description: >-
+  First-party CRD-only chart: the Gateway API Inference Extension custom resource
+  definitions (InferencePool + alpha siblings) the KV-aware router (Endpoint Picker)
+  needs. Cluster-scoped API registration — installed by the platform, not per-workload.
+type: application

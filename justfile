@@ -19,6 +19,39 @@ unit-test:
     uv run pytest
 
 # ==============================================================================
+# Vendored CRDs — Gateway API Inference Extension (InferencePool)
+# ==============================================================================
+# The inference-extension CRDs are vendored (committed) rather than pulled at
+# deploy time — upstream publishes no Helm chart, only a raw manifest. This recipe
+# re-vendors them from a pinned upstream release so bumping the version is one
+# command, not a hand-edit of ~800 lines. Change the version below and re-run.
+inference-extension-crd-version := "v1.0.1"
+
+# Re-vendor the InferencePool CRDs from the pinned upstream release.
+# Usage: just update-inference-extension-crds [version=vX.Y.Z]
+update-inference-extension-crds version=inference-extension-crd-version:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    dest="libs/inference-tf-aws-eks-karpenter/inference_tf_aws_eks_karpenter/template/charts/inference-extension/templates/crds.yaml"
+    url="https://github.com/kubernetes-sigs/gateway-api-inference-extension/releases/download/{{version}}/manifests.yaml"
+    echo "re-vendoring inference-extension CRDs from {{version}} ..."
+    body="$(mktemp)"
+    curl -fsSL "$url" -o "$body"
+    count="$(grep -c '^kind: CustomResourceDefinition' "$body" || true)"
+    if [ "$count" -eq 0 ]; then echo "error: no CRDs found at $url" >&2; exit 1; fi
+    {
+      echo "# Vendored verbatim from Gateway API Inference Extension {{version}}"
+      echo "# $url"
+      echo "# ${count} CustomResourceDefinitions: inferencepools (GA inference.networking.k8s.io),"
+      echo "# inferencepools + inferenceobjectives (alpha inference.networking.x-k8s.io the EPP watches)."
+      echo "# DO NOT hand-edit — run 'just update-inference-extension-crds' to change versions. Pinned to"
+      echo "# match the EPP image used by the workload chart (inference-charts)."
+      cat "$body"
+    } > "$dest"
+    rm -f "$body"
+    echo "wrote ${count} CRDs to $dest"
+
+# ==============================================================================
 # E2E test harness (via pytest-jupyter-deploy)
 # ==============================================================================
 # The E2E container image is template-independent and vended by the
