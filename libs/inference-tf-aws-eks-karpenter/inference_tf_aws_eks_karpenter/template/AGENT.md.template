@@ -7,7 +7,7 @@ workloads. It uses Terraform as the infrastructure-as-code engine and relies on
 [Karpenter](https://karpenter.sh) for node autoscaling over self-managed nodes.
 
 The template deploys:
-- A VPC with public and private subnets
+- A VPC with private subnets
 - An EKS cluster
 - Karpenter, with NodePools/EC2NodeClasses that provision self-managed nodes on demand
 
@@ -51,6 +51,20 @@ a base cluster with no GPU workload — the authoritative signal for those two i
 `-chart` **HelmRelease** row (chart install-state, which stays healthy regardless of
 whether a GPU node is up). Treat a Degraded GPU DaemonSet row as informational when no
 GPU node exists.
+
+### Manage the cluster
+
+{{ eks-cluster-management-instruction }}
+
+### Inspect and operate the platform components
+
+{{ kubernetes-component-management-instructions }}
+
+### Inspect the vendored platform images
+
+{{ image-management-instructions }}
+
+{{ aws-inspector-scanning }}
 
 ### Delete all the resources
 
