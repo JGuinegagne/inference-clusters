@@ -20,7 +20,7 @@ output "cluster_endpoint" {
 
 output "cluster_arn" {
   description = "ARN of the EKS cluster."
-  value = module.eks_cluster.cluster_arn
+  value       = module.eks_cluster.cluster_arn
 }
 
 output "cluster_ca_certificate" {
