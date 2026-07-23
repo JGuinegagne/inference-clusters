@@ -26,23 +26,43 @@ class TestManifest(unittest.TestCase):
         "kubeconfig_path",
     ]
     EXPECTED_COMMANDS = ["cluster.login", "cluster.status", "cluster.show", "host.list"]
-    # jd health wiring: the components/images layers + their backing commands.
+    # jd health wiring: the components/images layers + their backing commands. One status
+    # command per component `type:` we declare (jd derives the cmd name from the type).
     EXPECTED_HEALTH_COMMANDS = [
         "component.deployment.status",
+        "component.daemonset.status",
+        "component.statefulset.status",
+        "component.helmrelease.status",
         "image.status",
         "image.tags",
         "image.vulnerabilities",
     ]
-    EXPECTED_COMPONENTS = [
-        "karpenter",
-        "keda-operator",
-        "keda-metrics-apiserver",
-        "keda-admission-webhooks",
-        "prometheus-operator",
-        "grafana",
-        "kube-state-metrics",
-        "kro",
-    ]
+    # component -> declared type. Every entry must have a status verb; the type binds it to
+    # the matching component.<type>.status command above.
+    EXPECTED_COMPONENTS = {
+        "karpenter": "Deployment",
+        "keda-operator": "Deployment",
+        "keda-metrics-apiserver": "Deployment",
+        "keda-admission-webhooks": "Deployment",
+        "prometheus-operator": "Deployment",
+        "grafana": "Deployment",
+        "kube-state-metrics": "Deployment",
+        "kro": "Deployment",
+        "prometheus": "StatefulSet",
+        "alertmanager": "StatefulSet",
+        "node-exporter": "DaemonSet",
+        "dcgm-exporter": "DaemonSet",
+        "nvidia-device-plugin": "DaemonSet",
+        "dcgm-exporter-chart": "HelmRelease",
+        "nvidia-device-plugin-chart": "HelmRelease",
+    }
+    # The status method each type's status verb must name (mirrors the cmd blocks' api-name).
+    STATUS_METHOD_BY_TYPE = {
+        "Deployment": "k8s.apps.get-deployment-status",
+        "DaemonSet": "k8s.apps.get-daemonset-status",
+        "StatefulSet": "k8s.apps.get-statefulset-status",
+        "HelmRelease": "helm.status",
+    }
     EXPECTED_IMAGES = [
         "keda-operator",
         "keda-metrics-apiserver",
@@ -101,13 +121,21 @@ class TestManifest(unittest.TestCase):
     def test_health_components_declared(self) -> None:
         assert self.MANIFEST is not None
         components = self.MANIFEST.get("components", {})
-        for expected in self.EXPECTED_COMPONENTS:
+        for expected, expected_type in self.EXPECTED_COMPONENTS.items():
             self.assertIn(expected, components)
-        # every component must be a Deployment with a status verb (the only kind the CLI
-        # can status-check — DaemonSet/StatefulSet are omitted, tracked upstream).
+            self.assertEqual(
+                components[expected]["type"], expected_type, f"{expected} must be a {expected_type}"
+            )
+        # Every component declares a status verb whose method matches its type's status api.
         for name, comp in components.items():
-            self.assertEqual(comp["type"], "Deployment", f"{name} must be a Deployment")
             self.assertIn("status", comp["verbs"], f"{name} must declare a status verb")
+            comp_type = comp["type"]
+            self.assertIn(comp_type, self.STATUS_METHOD_BY_TYPE, f"{name} has unknown type {comp_type}")
+            self.assertEqual(
+                comp["verbs"]["status"]["method"],
+                self.STATUS_METHOD_BY_TYPE[comp_type],
+                f"{name} ({comp_type}) status method mismatch",
+            )
 
     def test_health_images_declared(self) -> None:
         assert self.MANIFEST is not None
