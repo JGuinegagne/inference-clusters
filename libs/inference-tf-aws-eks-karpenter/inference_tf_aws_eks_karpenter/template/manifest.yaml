@@ -7,6 +7,7 @@ requirements:
 - name: terraform
 - name: awscli
 - name: kubectl
+- name: helm
 # jd health: aggregate deployment-stack health. The cluster/components/images layers
 # apply; the connection + load-balancer layers self-skip (this is an endpoints-only VPC
 # with no public ingress/ELB — an end-to-end URL check is meaningless, so no open_url and
@@ -129,9 +130,12 @@ commands:
     source: result
     source-key: '[0].Resource'
 # --- jd health: component + image status ---
-# Deployment status backs the components: block (Karpenter, KEDA x3, prometheus-operator,
-# Grafana, kube-state-metrics, KRO). The CLI has no DaemonSet/StatefulSet status method,
-# so DCGM (DaemonSet) and the Prometheus server (StatefulSet) are not covered yet.
+# The components: block spans four component types, each bound BY ITS `type:` string to the
+# matching `component.<type>.status` command below (jd derives the cmd name from the type):
+#   Deployment  -> Karpenter, KEDA x3, prometheus-operator, Grafana, kube-state-metrics, KRO
+#   DaemonSet   -> node-exporter (every node), DCGM + device-plugin (GPU nodes only)
+#   StatefulSet -> Prometheus server, Alertmanager
+#   HelmRelease -> DCGM + device-plugin charts (pod-count-agnostic — see note below)
 - cmd: component.deployment.status
   sequence:
   - api-name: k8s.apps.get-deployment-status
@@ -153,6 +157,78 @@ commands:
     source: result
     source-key: '[0].Details'
   - result-name: component.deployment.status.sub_component
+    source: result
+    source-key: '[0].SubComponent'
+- cmd: component.daemonset.status
+  sequence:
+  - api-name: k8s.apps.get-daemonset-status
+    arguments:
+    - api-attribute: name
+      source: cli
+      source-key: name
+    - api-attribute: scope
+      source: cli
+      source-key: scope
+  results:
+  - result-name: component.daemonset.status.status
+    source: result
+    source-key: '[0].Status'
+  - result-name: component.daemonset.status.status_category
+    source: result
+    source-key: '[0].StatusCategory'
+  - result-name: component.daemonset.status.details
+    source: result
+    source-key: '[0].Details'
+  - result-name: component.daemonset.status.sub_component
+    source: result
+    source-key: '[0].SubComponent'
+- cmd: component.statefulset.status
+  sequence:
+  - api-name: k8s.apps.get-statefulset-status
+    arguments:
+    - api-attribute: name
+      source: cli
+      source-key: name
+    - api-attribute: scope
+      source: cli
+      source-key: scope
+  results:
+  - result-name: component.statefulset.status.status
+    source: result
+    source-key: '[0].Status'
+  - result-name: component.statefulset.status.status_category
+    source: result
+    source-key: '[0].StatusCategory'
+  - result-name: component.statefulset.status.details
+    source: result
+    source-key: '[0].Details'
+  - result-name: component.statefulset.status.sub_component
+    source: result
+    source-key: '[0].SubComponent'
+- cmd: component.helmrelease.status
+  sequence:
+  - api-name: helm.status
+    arguments:
+    - api-attribute: name
+      source: cli
+      source-key: name
+    - api-attribute: scope
+      source: cli
+      source-key: scope
+    - api-attribute: expected_cluster_config
+      source: output
+      source-key: cluster_arn
+  results:
+  - result-name: component.helmrelease.status.status
+    source: result
+    source-key: '[0].Status'
+  - result-name: component.helmrelease.status.status_category
+    source: result
+    source-key: '[0].StatusCategory'
+  - result-name: component.helmrelease.status.details
+    source: result
+    source-key: '[0].Details'
+  - result-name: component.helmrelease.status.sub_component
     source: result
     source-key: '[0].SubComponent'
 # Image status backs the images: block — confirms each vendored platform image landed in
@@ -216,10 +292,15 @@ commands:
     source: result
     source-key: '[0].ScannerType'
 # --- jd health: platform components ---
-# The Deployment-type platform operators. `scope` resolves to the namespace output; the
-# component key is the human label; `resource-name` is the actual Deployment name when it
-# differs from the key. (DCGM DaemonSet + Prometheus StatefulSet are omitted: the CLI has
-# no daemonset/statefulset status method — tracked upstream.)
+# `scope` resolves to a namespace output; the component key is the human label;
+# `resource-name` is the actual cluster object name when it differs from the key. Each
+# component's `type:` selects the backing status command (see the cmd blocks above).
+#
+# GPU-only DaemonSets (DCGM, device-plugin) are declared BOTH ways on purpose:
+#   - as a DaemonSet component  -> exact pod-per-GPU-node readiness (Degraded on a GPU-less
+#     cluster, since desired=0 — a known false-alarm, see AGENT.md);
+#   - as a HelmRelease component -> chart install state, which stays healthy regardless of
+#     whether any GPU node is currently up.
 components:
   karpenter:
     type: Deployment
@@ -283,6 +364,67 @@ components:
     verbs:
       status:
         method: k8s.apps.get-deployment-status
+  prometheus:
+    type: StatefulSet
+    description: Prometheus time-series server
+    resource-name: prometheus-kube-prometheus-stack-prometheus
+    scope: monitoring_namespace
+    verbs:
+      status:
+        method: k8s.apps.get-statefulset-status
+  alertmanager:
+    type: StatefulSet
+    description: Alertmanager (alert routing/dedup)
+    resource-name: alertmanager-kube-prometheus-stack-alertmanager
+    scope: monitoring_namespace
+    verbs:
+      status:
+        method: k8s.apps.get-statefulset-status
+  # DaemonSets. node-exporter runs on every node (Ready everywhere); the two GPU-only ones
+  # report Degraded on a GPU-less cluster (desired=0) — their HelmRelease twins below carry
+  # the authoritative install-state signal there.
+  node-exporter:
+    type: DaemonSet
+    description: Per-node hardware/OS metrics exporter
+    resource-name: kube-prometheus-stack-prometheus-node-exporter
+    scope: monitoring_namespace
+    verbs:
+      status:
+        method: k8s.apps.get-daemonset-status
+  dcgm-exporter:
+    type: DaemonSet
+    description: NVIDIA DCGM GPU-metrics exporter (GPU nodes only)
+    resource-name: dcgm-exporter
+    scope: monitoring_namespace
+    verbs:
+      status:
+        method: k8s.apps.get-daemonset-status
+  nvidia-device-plugin:
+    type: DaemonSet
+    description: NVIDIA device plugin — advertises GPUs as schedulable (GPU nodes only)
+    resource-name: nvidia-device-plugin
+    scope: kube_system_namespace
+    verbs:
+      status:
+        method: k8s.apps.get-daemonset-status
+  # HelmRelease twins for the GPU-only charts: chart install-state is pod-count-agnostic, so
+  # these stay healthy on a GPU-less cluster where the DaemonSet rows above read Degraded.
+  dcgm-exporter-chart:
+    type: HelmRelease
+    description: DCGM exporter Helm chart (GPU metrics)
+    resource-name: dcgm-exporter
+    scope: monitoring_namespace
+    verbs:
+      status:
+        method: helm.status
+  nvidia-device-plugin-chart:
+    type: HelmRelease
+    description: NVIDIA device-plugin Helm chart
+    resource-name: nvidia-device-plugin
+    scope: kube_system_namespace
+    verbs:
+      status:
+        method: helm.status
 # --- jd health: vendored platform images ---
 # Confirms each image the template vendors to ECR (the air-gapped failure mode) is present.
 # Workload/* images (chart-onboarded at runtime) are excluded — not known at template time.
