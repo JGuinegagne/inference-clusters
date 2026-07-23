@@ -26,19 +26,55 @@ class TestManifest(unittest.TestCase):
         "kubeconfig_path",
     ]
     EXPECTED_COMMANDS = ["cluster.login", "cluster.status", "cluster.show", "host.list"]
-    # jd health wiring: the components/images layers + their backing commands. One status
-    # command per component `type:` we declare (jd derives the cmd name from the type).
+    # jd health wiring: the components/images layers + their backing commands. jd derives a
+    # cmd name from `component.<type>.<verb>` / `image.<verb>`, so every verb a component
+    # declares needs its matching cmd block below.
     EXPECTED_HEALTH_COMMANDS = [
+        # component status (one per type)
         "component.deployment.status",
         "component.daemonset.status",
         "component.statefulset.status",
         "component.helmrelease.status",
+        # component show (one per type)
+        "component.deployment.show",
+        "component.daemonset.show",
+        "component.statefulset.show",
+        "component.helmrelease.show",
+        # Deployment logs+restart, HelmRelease reconcile
+        "component.deployment.logs",
+        "component.deployment.restart",
+        "component.helmrelease.reconcile",
+        # images
         "image.status",
+        "image.show",
         "image.tags",
         "image.vulnerabilities",
     ]
-    # component -> declared type. Every entry must have a status verb; the type binds it to
-    # the matching component.<type>.status command above.
+    # The verbs each component type declares -> the api-name method the verb must map to.
+    # A verb here requires both the per-component verb entry AND a matching cmd block.
+    VERBS_BY_TYPE = {
+        "Deployment": {
+            "status": "k8s.apps.get-deployment-status",
+            "show": "k8s.apps.get-deployment",
+            "logs": "k8s.core.deployment-logs",
+            "restart": "k8s.apps.rollout-restart",
+        },
+        "DaemonSet": {
+            "status": "k8s.apps.get-daemonset-status",
+            "show": "k8s.apps.get-daemonset",
+        },
+        "StatefulSet": {
+            "status": "k8s.apps.get-statefulset-status",
+            "show": "k8s.apps.get-statefulset",
+        },
+        "HelmRelease": {
+            "status": "helm.status",
+            "show": "helm.show",
+            "reconcile": "helm.reconcile",
+        },
+    }
+    # component -> declared type. The type binds each component to its full verb set
+    # (VERBS_BY_TYPE) and the matching component.<type>.<verb> command blocks.
     EXPECTED_COMPONENTS = {
         "karpenter": "Deployment",
         "keda-operator": "Deployment",
@@ -55,13 +91,6 @@ class TestManifest(unittest.TestCase):
         "nvidia-device-plugin": "DaemonSet",
         "dcgm-exporter-chart": "HelmRelease",
         "nvidia-device-plugin-chart": "HelmRelease",
-    }
-    # The status method each type's status verb must name (mirrors the cmd blocks' api-name).
-    STATUS_METHOD_BY_TYPE = {
-        "Deployment": "k8s.apps.get-deployment-status",
-        "DaemonSet": "k8s.apps.get-daemonset-status",
-        "StatefulSet": "k8s.apps.get-statefulset-status",
-        "HelmRelease": "helm.status",
     }
     EXPECTED_IMAGES = [
         "keda-operator",
@@ -123,19 +152,15 @@ class TestManifest(unittest.TestCase):
         components = self.MANIFEST.get("components", {})
         for expected, expected_type in self.EXPECTED_COMPONENTS.items():
             self.assertIn(expected, components)
-            self.assertEqual(
-                components[expected]["type"], expected_type, f"{expected} must be a {expected_type}"
-            )
-        # Every component declares a status verb whose method matches its type's status api.
+            self.assertEqual(components[expected]["type"], expected_type, f"{expected} must be a {expected_type}")
+        # Every component declares exactly its type's verb set, each mapped to the right api.
         for name, comp in components.items():
-            self.assertIn("status", comp["verbs"], f"{name} must declare a status verb")
             comp_type = comp["type"]
-            self.assertIn(comp_type, self.STATUS_METHOD_BY_TYPE, f"{name} has unknown type {comp_type}")
-            self.assertEqual(
-                comp["verbs"]["status"]["method"],
-                self.STATUS_METHOD_BY_TYPE[comp_type],
-                f"{name} ({comp_type}) status method mismatch",
-            )
+            self.assertIn(comp_type, self.VERBS_BY_TYPE, f"{name} has unknown type {comp_type}")
+            expected_verbs = self.VERBS_BY_TYPE[comp_type]
+            self.assertEqual(set(comp["verbs"]), set(expected_verbs), f"{name} ({comp_type}) verb set mismatch")
+            for verb, method in expected_verbs.items():
+                self.assertEqual(comp["verbs"][verb]["method"], method, f"{name} ({comp_type}) {verb} method mismatch")
 
     def test_health_images_declared(self) -> None:
         assert self.MANIFEST is not None
