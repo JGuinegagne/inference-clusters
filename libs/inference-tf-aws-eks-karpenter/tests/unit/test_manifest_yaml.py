@@ -1,6 +1,7 @@
 """Tests that the template manifest and variables files are well-formed."""
 
 import unittest
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
@@ -9,6 +10,16 @@ import yaml
 from jupyter_deploy.handlers import base_project_handler
 
 from inference_tf_aws_eks_karpenter.template import TEMPLATE_PATH
+
+
+class InferenceKarpenterComponentType(StrEnum):
+    """The health `components:` types this template declares (jd derives the backing
+    `component.<type>.<verb>` cmd from the type)."""
+
+    DEPLOYMENT = "Deployment"
+    DAEMONSET = "DaemonSet"
+    STATEFULSET = "StatefulSet"
+    HELMRELEASE = "HelmRelease"
 
 
 class TestManifest(unittest.TestCase):
@@ -53,21 +64,21 @@ class TestManifest(unittest.TestCase):
     # The verbs each component type declares -> the api-name method the verb must map to.
     # A verb here requires both the per-component verb entry AND a matching cmd block.
     VERBS_BY_TYPE = {
-        "Deployment": {
+        InferenceKarpenterComponentType.DEPLOYMENT: {
             "status": "k8s.apps.get-deployment-status",
             "show": "k8s.apps.get-deployment",
             "logs": "k8s.core.deployment-logs",
             "restart": "k8s.apps.rollout-restart",
         },
-        "DaemonSet": {
+        InferenceKarpenterComponentType.DAEMONSET: {
             "status": "k8s.apps.get-daemonset-status",
             "show": "k8s.apps.get-daemonset",
         },
-        "StatefulSet": {
+        InferenceKarpenterComponentType.STATEFULSET: {
             "status": "k8s.apps.get-statefulset-status",
             "show": "k8s.apps.get-statefulset",
         },
-        "HelmRelease": {
+        InferenceKarpenterComponentType.HELMRELEASE: {
             "status": "helm.status",
             "show": "helm.show",
             "reconcile": "helm.reconcile",
@@ -76,21 +87,21 @@ class TestManifest(unittest.TestCase):
     # component -> declared type. The type binds each component to its full verb set
     # (VERBS_BY_TYPE) and the matching component.<type>.<verb> command blocks.
     EXPECTED_COMPONENTS = {
-        "karpenter": "Deployment",
-        "keda-operator": "Deployment",
-        "keda-metrics-apiserver": "Deployment",
-        "keda-admission-webhooks": "Deployment",
-        "prometheus-operator": "Deployment",
-        "grafana": "Deployment",
-        "kube-state-metrics": "Deployment",
-        "kro": "Deployment",
-        "prometheus": "StatefulSet",
-        "alertmanager": "StatefulSet",
-        "node-exporter": "DaemonSet",
-        "dcgm-exporter": "DaemonSet",
-        "nvidia-device-plugin": "DaemonSet",
-        "dcgm-exporter-chart": "HelmRelease",
-        "nvidia-device-plugin-chart": "HelmRelease",
+        "karpenter": InferenceKarpenterComponentType.DEPLOYMENT,
+        "keda-operator": InferenceKarpenterComponentType.DEPLOYMENT,
+        "keda-metrics-apiserver": InferenceKarpenterComponentType.DEPLOYMENT,
+        "keda-admission-webhooks": InferenceKarpenterComponentType.DEPLOYMENT,
+        "prometheus-operator": InferenceKarpenterComponentType.DEPLOYMENT,
+        "grafana": InferenceKarpenterComponentType.DEPLOYMENT,
+        "kube-state-metrics": InferenceKarpenterComponentType.DEPLOYMENT,
+        "kro": InferenceKarpenterComponentType.DEPLOYMENT,
+        "prometheus": InferenceKarpenterComponentType.STATEFULSET,
+        "alertmanager": InferenceKarpenterComponentType.STATEFULSET,
+        "node-exporter": InferenceKarpenterComponentType.DAEMONSET,
+        "dcgm-exporter": InferenceKarpenterComponentType.DAEMONSET,
+        "nvidia-device-plugin": InferenceKarpenterComponentType.DAEMONSET,
+        "dcgm-exporter-chart": InferenceKarpenterComponentType.HELMRELEASE,
+        "nvidia-device-plugin-chart": InferenceKarpenterComponentType.HELMRELEASE,
     }
     EXPECTED_IMAGES = [
         "keda-operator",
