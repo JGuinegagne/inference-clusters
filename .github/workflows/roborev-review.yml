@@ -18,7 +18,7 @@
 #   REVIEW_RUN_ROLE_ARN   IAM role ARN (review_run_iam_role_arn output)
 #   REVIEW_IMAGE          ECR image ref, e.g. <repo-url>:latest
 #   REVIEW_BEDROCK_MODEL  Bedrock model / inference-profile ID (e.g. us.anthropic.claude-opus-4-8)
-#   REVIEW_AWS_REGION     optional, defaults to us-west-2
+#   REVIEW_AWS_REGION     optional, defaults to us-east-1
 
 name: roborev review
 
@@ -111,7 +111,7 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.REVIEW_RUN_ROLE_ARN }}
-          aws-region: ${{ vars.REVIEW_AWS_REGION || 'us-west-2' }}
+          aws-region: ${{ vars.REVIEW_AWS_REGION || 'us-east-1' }}
           # Pin the session to 1h: long enough for the 30-min job with margin, short
           # enough to keep the leaked-credential window small. Keep this above the job
           # timeout; a longer job means raising both.
@@ -146,7 +146,7 @@ jobs:
         run: |
           set -euo pipefail
           registry="${REVIEW_IMAGE%%/*}"
-          aws ecr get-login-password --region "${{ vars.REVIEW_AWS_REGION || 'us-west-2' }}" \
+          aws ecr get-login-password --region "${{ vars.REVIEW_AWS_REGION || 'us-east-1' }}" \
             | docker login --username AWS --password-stdin "$registry"
           docker pull "$REVIEW_IMAGE"
 

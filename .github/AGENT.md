@@ -8,6 +8,7 @@
 | `lint.yml` | `workflow_call` | Reusable: ruff check, ruff format --check, mypy, yamllint, terraform fmt |
 | `test.yml` | `workflow_call` | Reusable: `uv run pytest` (unit tests) |
 | `roborev-review.yml` | `pull_request_target` / `workflow_dispatch` | Automated PR review via roborev + claude-code on Bedrock |
+| `review-build-image.yml` | `workflow_dispatch` / push to `.github/review/**` | Build + push the roborev review image to the CI-account ECR |
 
 This is a **single-package** uv workspace, so `ci.yml` runs lint/test against the repo root
 (`working-directory: '.'`) — there is no affected-dirs discovery/matrix like jupyter-deploy has.
@@ -23,15 +24,31 @@ so it can live on `main` before the CI account exists. Policy is in [`.roborev.t
 (shared with local `just review`). The review image is built from [`review/Dockerfile`](review/Dockerfile)
 (roborev + claude-code + gh + jq).
 
-**Repo variables** (set after `jupyter-infra-tf-aws-iam-ci` is deployed with
-`create_review_resources = true` and the review image is published):
+**Publishing the review image** — `review-build-image.yml` assumes the publish role, builds
+`review/Dockerfile` (via the `just ci-review-*` recipes), and pushes to the CI-account ECR repo.
+It is inert until its two vars are set; trigger it once via `workflow_dispatch` to publish the
+first image, after which it rebuilds automatically on pushes to `main` touching `review/**`.
+`roborev-review.yml` then *consumes* that published image. So the wiring order is: deploy
+CI-infra → set the two publish vars below → run `review-build-image.yml` → set the four consume
+vars → roborev goes live.
+
+**Repo variables — publish** (set after `jupyter-infra-tf-aws-iam-ci` is deployed with
+`create_review_resources = true`):
+
+| Variable | Source (tf output) |
+|---|---|
+| `REVIEW_PUBLISH_ROLE_ARN` | `review_publish_iam_role_arn` |
+| `REVIEW_ECR_REPOSITORY` | `review_image_repository_url` |
+| `REVIEW_AWS_REGION` | optional, defaults `us-east-1` |
+
+**Repo variables — consume** (set after the review image is published):
 
 | Variable | Source (tf output) |
 |---|---|
 | `REVIEW_RUN_ROLE_ARN` | `review_run_iam_role_arn` |
 | `REVIEW_IMAGE` | `review_image_repository_url` + `:latest` |
 | `REVIEW_BEDROCK_MODEL` | `us.anthropic.claude-opus-4-8` (same as jupyter-deploy) |
-| `REVIEW_AWS_REGION` | optional, defaults `us-west-2` |
+| `REVIEW_AWS_REGION` | optional, defaults `us-east-1` |
 
 **SECURITY:** `pull_request_target` runs with repo credentials, so the job never executes PR
 code — it checks out the trusted base branch, fetches the PR head as git objects only, and
