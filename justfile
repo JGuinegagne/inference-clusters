@@ -18,6 +18,27 @@ lint:
 unit-test:
     uv run pytest
 
+# Bump one template's version across pyproject/__init__/manifest/main.tf + synced charts, then relock
+# Templates are independently versioned; pass the template key (e.g. eks-karpenter).
+# Usage: just update-version <template> [patch|minor|major|<explicit-version>]
+update-version template bump="patch":
+    uv run python scripts/upgrade_template_version.py {{template}} {{bump}}
+    uv lock
+
+# Review the current branch against main with roborev (shares .roborev.toml with CI)
+review:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    command -v roborev >/dev/null 2>&1 || { echo "roborev not found. Install it from https://roborev.io, then optionally run 'just review-setup'."; exit 1; }
+    roborev review --branch --local --wait
+
+# Opt-in: install the roborev post-commit hook for continuous local review
+review-setup:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    command -v roborev >/dev/null 2>&1 || { echo "roborev not found. Install it from https://roborev.io first."; exit 1; }
+    roborev init --agent claude-code
+
 # ==============================================================================
 # Vendored CRDs — Gateway API Inference Extension (InferencePool)
 # ==============================================================================
