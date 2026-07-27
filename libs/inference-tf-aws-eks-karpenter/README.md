@@ -22,13 +22,24 @@ layered onto. It ships the platform components a GPU inference stack needs, and 
 This template is meant to be used with the
 [jupyter-deploy](https://github.com/jupyter-infra/jupyter-deploy) CLI.
 
-### Installation (with pip)
+### Installation
 
-Recommended: create or activate a python virtual environment.
+Recommended: use [uv](https://docs.astral.sh/uv/) to create a virtual environment.
 
 ```bash
-pip install "jupyter-deploy[aws,k8s]"
-pip install inference-tf-aws-eks-karpenter
+# prepare your virtual environment
+uv init . --bare
+uv venv
+source .venv/bin/activate
+
+# install the dependencies
+uv add "jupyter-deploy[aws,k8s]" inference-tf-aws-eks-karpenter
+```
+
+Or with pip, into an active virtual environment:
+
+```bash
+pip install "jupyter-deploy[aws,k8s]" inference-tf-aws-eks-karpenter
 ```
 
 ### Project setup
@@ -110,18 +121,18 @@ This project:
 
 All variables are defined in `template/engine/variables.tf`; defaults live in
 `template/engine/presets/defaults-all.tfvars`. Run `jd show --variables --list` on a scaffolded
-project for the authoritative list with descriptions and recommended values. The main groups:
+project for descriptions and recommended values. Grouped by concern:
 
-| Group | Variables (selection) |
+| Group | Variables |
 |---|---|
 | Cluster | `region`, `cluster_name_prefix`, `kubernetes_version`, `custom_tags`, `cluster_log_retention_days` |
 | Networking | `enable_nat_gateway` |
 | Bootstrap node group | `bootstrap_instance_types`, `bootstrap_desired_size`, `bootstrap_min_size`, `bootstrap_max_size` |
 | Access | `admin_role_names`, `admin_user_names` |
-| Autoscaling / Karpenter | `karpenter_version`, `cluster_autoscaler_chart_version`, `enable_gpu_p_nodepool`, `gpu_p_capacity_reservation_id` |
-| GPU + monitoring | `nvidia_device_plugin_version`, `nvidia_device_plugin_chart_version`, `nvidia_dcgm_exporter_version`, `dcgm_exporter_chart_version`, `kube_prometheus_stack_chart_version`, `grafana_version`, `prometheus_retention`, `prometheus_memory_limit`, `enable_container_insights` |
+| Autoscaling / Karpenter | `karpenter_version`, `cluster_autoscaler_chart_version`, `enable_gpu_p_nodepool`, `gpu_p_capacity_reservation_id`, `cpu_capacity`, `memory_capacity` |
+| GPU + monitoring | `nvidia_device_plugin_version`, `nvidia_device_plugin_chart_version`, `nvidia_dcgm_exporter_version`, `dcgm_exporter_chart_version`, `kube_prometheus_stack_chart_version`, `grafana_version`, `prometheus_retention`, `prometheus_memory_limit`, `enable_container_insights`, `metrics_server_chart_version` |
 | Autoscaling operators | `keda_chart_version`, `kro_chart_version` |
-| Batch / multi-node | `enable_lws`, `lws_chart_version`, `enable_kueue`, `kueue_chart_version`, `kueue_cluster_queue_name`, `gpu_g_capacity`, `gpu_p_capacity`, `kueue_gpu_lending_limit` |
+| Batch / multi-node | `enable_lws`, `lws_chart_version`, `enable_kueue`, `kueue_chart_version`, `kueue_cluster_queue_name`, `gpu_g_capacity`, `gpu_p_capacity`, `kueue_gpu_lending_limit`, `enable_efa`, `efa_device_plugin_chart_version`, `efa_device_plugin_image_tag` |
 | Storage / images | `mountpoint_s3_csi_version`, `common_images`, `workload_namespace` |
 | Inference routing | `enable_inference_routing` |
 
@@ -138,6 +149,10 @@ project for the authoritative list with descriptions and recommended values. The
 | `vpc_id` | VPC ID |
 | `kubeconfig_path` | Path to the generated kubeconfig |
 | `model_store_bucket` / `model_store_bucket_arn` | S3 bucket for serving weights |
+| `batch_intake_bucket` / `batch_intake_bucket_arn` | S3 bucket batch-inference requests flow into |
+| `batch_output_bucket` / `batch_output_bucket_arn` | S3 bucket batch-inference results and metrics land in |
+| `batch_inference_service_account_name` | Service account with batch S3 access via Pod Identity |
+| `batch_storage_config_map_name` | ConfigMap of batch bucket names and AWS Region |
 | `models_s3_uri` / `onboarder_input_s3_uri` / `onboarder_output_s3_uri` | Model-onboarding S3 locations |
 | `onboarder_codebuild_project` | CodeBuild project that stages models/images |
 | `ecr_registry` / `workload_repo_prefix` | ECR registry + workload repo prefix |

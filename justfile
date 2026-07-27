@@ -112,6 +112,160 @@ ci-review-pull ecr_url tag="latest":
     echo "✓ Pulled and tagged as inference-review:latest"
 
 # ==============================================================================
+# CI e2e plumbing
+# ==============================================================================
+# These recipes run in CI (e2e-karpenter-*.yml). They use the published `jd` CLI
+# installed in this workspace (jupyter-deploy from PyPI — the same version users
+# get), driving it with `uv run jd`. The restore/takedown entrypoints live in this
+# repo's scripts/ (importing the vendored scripts/ci_helpers.py). All template-scoped
+# with a -karpenter suffix so a future template adds its own set.
+
+ci-dir := "sandbox-ci"
+e2e-dir := "sandbox-e2e"
+e2e-karpenter-image := "inference-e2e-karpenter"
+
+# Restore the CI infra project (tf-aws-iam-ci) from the S3 store (reads its outputs)
+ci-restore ci_dir=ci-dir:
+    uv run python {{justfile_directory()}}/scripts/ci_restore.py {{ci_dir}}
+
+# Restore a karpenter e2e project from the store (for teardown/inspection).
+# Pass a deployment_id to pick a specific project when several coexist (parallel runs).
+ci-restore-karpenter project_dir=e2e-dir deployment_id="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    ARGS="{{project_dir}}"
+    if [ -n "{{deployment_id}}" ]; then ARGS="$ARGS --deployment-id {{deployment_id}}"; fi
+    uv run python {{justfile_directory()}}/scripts/ci_restore_karpenter.py $ARGS
+
+# Tear down + delete karpenter e2e project(s). With a deployment_id, reap only that one
+# (the standard e2e flow's own-deployment teardown). Without, reap ALL — the nuclear
+# option for the standalone cleanup workflow (orphans from interrupted runs).
+find-takedown-karpenter project_dir=e2e-dir deployment_id="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    ARGS="{{project_dir}}"
+    if [ -n "{{deployment_id}}" ]; then ARGS="$ARGS --deployment-id {{deployment_id}}"; fi
+    uv run python {{justfile_directory()}}/scripts/find_takedown_karpenter.py $ARGS
+
+# ECR repo URL for the e2e image (slot 1 of the CI-infra deploy)
+ci-e2e-karpenter-ecr-url ci_dir=ci-dir:
+    @uv run jd show -o ecr_repository_url_1 --text -p {{ci_dir}}
+
+# Test-results S3 bucket name
+ci-test-results-bucket ci_dir=ci-dir:
+    @uv run jd show -o test_results_bucket_name --text -p {{ci_dir}}
+
+# Upload test results to S3 on failure (keyed by timestamp)
+ci-upload-test-results ci_dir=ci-dir results_dir="test-results":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ ! -d "{{results_dir}}" ] || [ -z "$(ls -A {{results_dir}} 2>/dev/null)" ]; then
+        echo "No test results to upload"
+        exit 0
+    fi
+    BUCKET=$(just ci-test-results-bucket {{ci_dir}})
+    TS=$(date -u +"%Y-%m-%d-%H-%M")
+    S3_PATH="s3://${BUCKET}/${TS}/karpenter/"
+    echo "Uploading test results to ${S3_PATH}..."
+    aws s3 cp "{{results_dir}}/" "$S3_PATH" --recursive
+
+# Pull the e2e image from ECR (layer cache) and tag locally
+ci-e2e-karpenter-pull tag="latest" ci_dir=ci-dir:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    ECR_URL=$(just ci-e2e-karpenter-ecr-url {{ci_dir}})
+    REGISTRY=$(echo "$ECR_URL" | cut -d'/' -f1)
+    REGION=$(echo "$ECR_URL" | cut -d'.' -f4)
+    aws ecr get-login-password --region "$REGION" | {{container-tool}} login --username AWS --password-stdin "$REGISTRY"
+    {{container-tool}} pull "$ECR_URL:{{tag}}" || true
+    {{container-tool}} tag "$ECR_URL:{{tag}}" {{e2e-karpenter-image}}:latest 2>/dev/null || true
+
+# Build the e2e image: the pytest-jupyter-deploy base (system tooling) then this repo's
+# .github/e2e/Dockerfile on top (bakes in the workspace env: the published jd CLI + this
+# template, installed editable). Context is the repo root.
+ci-e2e-karpenter-build cache_from="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    ROOT={{justfile_directory()}}
+    # Base image (system packages, terraform, aws, kubectl, helm) — no Python env.
+    BASE_DOCKERFILE=$(uv run python -c \
+        "from pytest_jupyter_deploy.image import IMAGE_PATH; print(IMAGE_PATH / 'Dockerfile')")
+    BASE_DIR=$(dirname "$BASE_DOCKERFILE")
+    echo "Building base image {{e2e-karpenter-image}}:base ..."
+    {{container-tool}} build \
+        -f "$BASE_DOCKERFILE" \
+        --build-arg USER_UID={{HOST_UID}} \
+        --build-arg USER_GID={{HOST_GID}} \
+        -t {{e2e-karpenter-image}}:base \
+        "$BASE_DIR"
+    CACHE_ARG=""
+    if [ -n "{{cache_from}}" ]; then CACHE_ARG="--cache-from={{cache_from}}"; fi
+    echo "Building e2e image {{e2e-karpenter-image}}:latest ..."
+    {{container-tool}} build \
+        -f "$ROOT/.github/e2e/Dockerfile" \
+        --build-arg BASE_IMAGE={{e2e-karpenter-image}}:base \
+        $CACHE_ARG \
+        -t {{e2e-karpenter-image}}:latest \
+        "$ROOT"
+
+# Push the e2e image to ECR (:latest and optional extra tag, e.g. git sha)
+ci-e2e-karpenter-push extra_tag="" ci_dir=ci-dir:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    ECR_URL=$(just ci-e2e-karpenter-ecr-url {{ci_dir}})
+    REGISTRY=$(echo "$ECR_URL" | cut -d'/' -f1)
+    REGION=$(echo "$ECR_URL" | cut -d'.' -f4)
+    aws ecr get-login-password --region "$REGION" | {{container-tool}} login --username AWS --password-stdin "$REGISTRY"
+    {{container-tool}} tag {{e2e-karpenter-image}}:latest "$ECR_URL:latest"
+    {{container-tool}} push "$ECR_URL:latest"
+    if [ -n "{{extra_tag}}" ]; then
+        {{container-tool}} tag {{e2e-karpenter-image}}:latest "$ECR_URL:{{extra_tag}}"
+        {{container-tool}} push "$ECR_URL:{{extra_tag}}"
+    fi
+
+# Deploy a fresh EKS+Karpenter cluster inside the pre-built container.
+# Runs jd init/config/up as explicit log-streaming steps so the ~20-30 min deploy is
+# readable. Uses tests/e2e/configurations/base.yaml as the deploy config.
+ci-e2e-karpenter-deploy project_dir=e2e-dir:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    ROOT={{justfile_directory()}}
+    : "${AWS_REGION:=$(aws configure get region 2>/dev/null || true)}"
+    if [ -z "${AWS_REGION:-}" ]; then echo "Error: AWS_REGION is not set"; exit 1; fi
+    export AWS_REGION
+    mkdir -p "$ROOT/{{project_dir}}"
+    E2E_IMAGE_DIR="$(uv run python -c 'from pytest_jupyter_deploy.image import IMAGE_PATH; print(IMAGE_PATH)')"
+    E2E_COMPOSE="-f $E2E_IMAGE_DIR/docker-compose.yml -f $ROOT/docker-compose.e2e-name.yml"
+    OVERRIDE_FILE="$ROOT/docker-compose.e2e-override.yml"
+    printf 'services:\n  e2e:\n    image: {{e2e-karpenter-image}}:latest\n    volumes:\n      - ./{{project_dir}}:/workspace/{{project_dir}}\n' > "$OVERRIDE_FILE"
+    trap 'rm -f "$OVERRIDE_FILE"' EXIT
+    mkdir -p "$HOME/.kube"
+    export E2E_IMAGE="{{e2e-karpenter-image}}:latest"
+    {{container-tool}} compose --project-directory "$ROOT" $E2E_COMPOSE down
+    {{container-tool}} compose --project-directory "$ROOT" $E2E_COMPOSE -f "$OVERRIDE_FILE" up -d --no-build
+    just e2e-ensure-helm
+    EXEC="{{container-tool}} compose --project-directory $ROOT $E2E_COMPOSE exec -e PYTHONUNBUFFERED=1 e2e bash -c"
+    echo "=== jd init ==="
+    $EXEC ". .venv/bin/activate && cd /workspace && jupyter-deploy init -E terraform -P aws -I eks -T karpenter {{project_dir}}"
+    echo "=== copy deploy config (base.yaml) into the project ==="
+    cp "$ROOT/libs/inference-tf-aws-eks-karpenter/tests/e2e/configurations/base.yaml" "$ROOT/{{project_dir}}/variables.yaml"
+    echo "=== jd config ==="
+    $EXEC ". .venv/bin/activate && cd /workspace/{{project_dir}} && jupyter-deploy config -v"
+    echo "=== jd up ==="
+    # Capture the rc but do NOT abort: we still want to emit the deployment_id below
+    # so a mid-apply failure can be torn down scoped to its own deployment (jd backs
+    # the partial state up to the store even on failure).
+    UP_RC=0
+    $EXEC ". .venv/bin/activate && cd /workspace/{{project_dir}} && jupyter-deploy up -y -v" || UP_RC=$?
+    # Emit the deployment_id so the caller can scope teardown to THIS deployment
+    # (parallel runs each reap only their own). Written to $GITHUB_OUTPUT in CI.
+    echo "=== deployment id ==="
+    DEPLOYMENT_ID=$($EXEC ". .venv/bin/activate && cd /workspace/{{project_dir}} && jupyter-deploy show -o deployment_id --text" 2>/dev/null | tr -d '[:space:]' || true)
+    echo "deployment_id=$DEPLOYMENT_ID"
+    if [ -n "${GITHUB_OUTPUT:-}" ]; then echo "deployment_id=$DEPLOYMENT_ID" >> "$GITHUB_OUTPUT"; fi
+    exit "$UP_RC"
+
+# ==============================================================================
 # Vendored CRDs — Gateway API Inference Extension (InferencePool)
 # ==============================================================================
 # The inference-extension CRDs are vendored (committed) rather than pulled at
@@ -299,7 +453,8 @@ e2e-sync:
 # Usage: just test-e2e [project-dir] [test-filter] [options] [template]
 # Options: comma-separated key=value pairs, recognized keys:
 #   full-deploy=true   include full_deployment tests (deploys real infra)
-#   mutate=true        include mutating tests
+#   mutate=true        include mutating tests (also pass marker=mutating to run ONLY those)
+#   marker=<expr>      narrow the marker selection, e.g. marker=mutating (default: all e2e)
 #   destroy=true       destroy after a from-scratch deploy
 #   log-level=debug    pytest --log-cli-level
 #   skip-sync=true     use the pre-built image as-is (don't re-sync the workspace)
@@ -381,10 +536,18 @@ test-e2e project_dir="sandbox-e2e" test_filter="" options="" template=default-te
         exit 1
     fi
 
+    # Marker expression: default all e2e tests; marker=<expr> narrows it (e.g.
+    # marker=mutating runs only the mutating cases in a dedicated step).
+    MARKER_EXPR="e2e"
+    if echo "{{options}}" | grep -qE "marker=[a-zA-Z0-9_ -]+"; then
+        EXTRA_MARKER=$(echo "{{options}}" | grep -oE "marker=[a-zA-Z0-9_ -]+" | cut -d'=' -f2)
+        MARKER_EXPR="e2e and $EXTRA_MARKER"
+    fi
+
     if [ "$IS_DEPLOYMENT_FROM_SCRATCH" = "true" ]; then
-        PYTEST_ARGS="$E2E_TESTS_DIR -m e2e --e2e-tests-dir=$E2E_TESTS_DIR"
+        PYTEST_ARGS="$E2E_TESTS_DIR -m \"$MARKER_EXPR\" --e2e-tests-dir=$E2E_TESTS_DIR"
     else
-        PYTEST_ARGS="$E2E_TESTS_DIR -m e2e --e2e-tests-dir=$E2E_TESTS_DIR --e2e-existing-project={{project_dir}}"
+        PYTEST_ARGS="$E2E_TESTS_DIR -m \"$MARKER_EXPR\" --e2e-tests-dir=$E2E_TESTS_DIR --e2e-existing-project={{project_dir}}"
     fi
 
     if [ -n "{{test_filter}}" ]; then PYTEST_ARGS="$PYTEST_ARGS -k {{test_filter}}"; fi

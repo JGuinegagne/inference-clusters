@@ -37,12 +37,19 @@ import re
 import sys
 import tomllib
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).parent.parent
 LIBS = REPO_ROOT / "libs"
 
-BUMP_KEYWORDS = ("patch", "minor", "major")
+
+class Bump(str, Enum):
+    """A semantic-version bump keyword."""
+
+    PATCH = "patch"
+    MINOR = "minor"
+    MAJOR = "major"
 
 
 @dataclass(frozen=True)
@@ -85,7 +92,7 @@ def read_pyproject_version(file_path: Path) -> str:
         return str(tomllib.load(f)["project"]["version"])
 
 
-def compute_bumped_version(current: str, bump: str) -> str:
+def compute_bumped_version(current: str, bump: Bump) -> str:
     """Bump the X.Y.Z core of `current` (dropping any pre-release suffix)."""
     match = re.match(r"^(\d+)\.(\d+)\.(\d+)", current)
     if not match:
@@ -93,13 +100,22 @@ def compute_bumped_version(current: str, bump: str) -> str:
         sys.exit(1)
     major, minor, patch = (int(part) for part in match.groups())
 
-    if bump == "major":
-        major, minor, patch = major + 1, 0, 0
-    elif bump == "minor":
-        minor, patch = minor + 1, 0
-    else:  # patch
-        patch += 1
-    return f"{major}.{minor}.{patch}"
+    if bump is Bump.MAJOR:
+        return f"{major + 1}.0.0"
+    if bump is Bump.MINOR:
+        return f"{major}.{minor + 1}.0"
+    if bump is Bump.PATCH:
+        return f"{major}.{minor}.{patch + 1}"
+    raise ValueError(f"unrecognized bump: {bump!r}")
+
+
+def resolve_new_version(current: str, bump_or_version: str) -> str:
+    """A bump keyword computes from `current`; anything else is an explicit version."""
+    try:
+        bump = Bump(bump_or_version)
+    except ValueError:
+        return bump_or_version  # explicit version string (e.g. 0.1.0rc2)
+    return compute_bumped_version(current, bump)
 
 
 def pep440_to_semver(version: str) -> str:
@@ -177,10 +193,7 @@ def main() -> None:
 
     spec = TEMPLATES[args.template]
     current = read_pyproject_version(spec.package_dir / "pyproject.toml")
-    if args.bump_or_version in BUMP_KEYWORDS:
-        new_version = compute_bumped_version(current, args.bump_or_version)
-    else:
-        new_version = args.bump_or_version
+    new_version = resolve_new_version(current, args.bump_or_version)
 
     print(f"{args.template}: {current} -> {new_version} (charts: {pep440_to_semver(new_version)})\n")
     upgrade(spec, new_version)

@@ -1,0 +1,65 @@
+name: "E2E Karpenter — build image"
+
+# Build the e2e container image (pytest-jupyter-deploy base + this workspace's env:
+# the published jd CLI + this template) and push it to the CI-account ECR (slot 1).
+# The deploy and test jobs pull this pre-built image.
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: "Git ref to checkout (default: triggering ref)"
+        required: false
+        type: string
+        default: ""
+    outputs:
+      ecr-tag:
+        description: "ECR image tag for downstream jobs to pull"
+        value: ${{ jobs.build.outputs.ecr-tag }}
+
+jobs:
+  build:
+    name: "Build and push e2e image"
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: e2e
+    permissions:
+      id-token: write
+      contents: read
+    outputs:
+      ecr-tag: ${{ github.sha }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: Install UV and Python
+        uses: ./.github/actions/install-uv
+        with:
+          python-version: "3.13"
+
+      - name: Install just
+        uses: ./.github/actions/install-just
+
+      - name: Install dependencies
+        run: uv sync --all-packages
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_E2E_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Restore CI project
+        run: just ci-restore sandbox-ci
+
+      - name: Pull previous image for cache
+        run: just ci-e2e-karpenter-pull latest sandbox-ci || true
+
+      - name: Build e2e image
+        run: |
+          ECR_URL=$(just ci-e2e-karpenter-ecr-url sandbox-ci)
+          just ci-e2e-karpenter-build "$ECR_URL:latest"
+
+      - name: Push to ECR
+        run: just ci-e2e-karpenter-push ${{ github.sha }} sandbox-ci

@@ -1,0 +1,130 @@
+name: "E2E Karpenter — test job"
+
+# Reusable: run the karpenter e2e suite against an already-deployed cluster (pulls the
+# pre-built image and uses skip-sync so the image's baked-in env is used as-is).
+on:
+  workflow_call:
+    inputs:
+      test-filter:
+        description: "Pytest -k filter (empty = all tests)"
+        required: false
+        type: string
+        default: ""
+      marker:
+        description: "Pytest marker to narrow selection (e.g. mutating); empty = all e2e tests"
+        required: false
+        type: string
+        default: ""
+      mutate:
+        description: "Enable mutating test cases (--with-mutating-cases)"
+        required: false
+        type: boolean
+        default: false
+      timeout-minutes:
+        description: "Job timeout in minutes"
+        required: false
+        type: number
+        default: 120
+      ref:
+        description: "Git ref to checkout (default: triggering ref)"
+        required: false
+        type: string
+        default: ""
+      ecr-tag:
+        description: "ECR image tag to pull"
+        required: true
+        type: string
+      deployment-id:
+        description: "Karpenter deployment id to restore (isolates parallel runs); empty = sole project"
+        required: false
+        type: string
+        default: ""
+
+jobs:
+  test:
+    name: "Run e2e tests"
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    environment: e2e
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: Install UV and Python
+        uses: ./.github/actions/install-uv
+        with:
+          python-version: "3.13"
+
+      - name: Install just
+        uses: ./.github/actions/install-just
+
+      - name: Install dependencies
+        run: uv sync --all-packages
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.5.7"
+          terraform_wrapper: false
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_E2E_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-duration-seconds: 7200
+
+      - name: Restore CI project
+        run: just ci-restore sandbox-ci
+
+      - name: Restore karpenter e2e project
+        env:
+          DEPLOYMENT_ID: ${{ inputs.deployment-id }}
+        run: just ci-restore-karpenter sandbox-e2e "$DEPLOYMENT_ID"
+
+      - name: Pull pre-built e2e image
+        env:
+          ECR_TAG: ${{ inputs.ecr-tag }}
+        run: just ci-e2e-karpenter-pull "$ECR_TAG" sandbox-ci
+
+      - name: Build test options
+        id: opts
+        # Inputs are referenced via env, never interpolated into the script body:
+        # GitHub expands ${{ }} as literal text before the shell parses it, so an
+        # interpolated workflow_dispatch input could inject shell commands into this
+        # privileged job. Shell variables are not re-parsed.
+        env:
+          MUTATE: ${{ inputs.mutate }}
+          MARKER: ${{ inputs.marker }}
+        run: |
+          OPTIONS="full-deploy=true,skip-sync=true"
+          if [ "$MUTATE" = "true" ]; then OPTIONS="mutate=true,${OPTIONS}"; fi
+          if [ -n "$MARKER" ]; then OPTIONS="marker=${MARKER},${OPTIONS}"; fi
+          echo "options=${OPTIONS}" >> "$GITHUB_OUTPUT"
+
+      - name: Run e2e tests
+        # See "Build test options": inputs go through env, not the script body.
+        env:
+          TEST_FILTER: ${{ inputs.test-filter }}
+          OPTIONS: ${{ steps.opts.outputs.options }}
+        run: >-
+          just test-e2e-eks-karpenter sandbox-e2e "$TEST_FILTER" "$OPTIONS"
+
+      - name: Upload test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          # Unique per deployment + marker so parallel runs / both test steps don't collide.
+          name: test-results-karpenter-${{ inputs.deployment-id || github.run_id }}-${{ inputs.marker || 'all' }}
+          path: test-results/
+          if-no-files-found: ignore
+
+      - name: Upload test results to S3
+        if: failure()
+        continue-on-error: true
+        run: just ci-upload-test-results sandbox-ci

@@ -9,9 +9,17 @@
 | `test.yml` | `workflow_call` | Reusable: `uv run pytest` (unit tests) |
 | `roborev-review.yml` | `pull_request_target` / `workflow_dispatch` | Automated PR review via roborev + claude-code on Bedrock |
 | `review-build-image.yml` | `workflow_dispatch` / push to `.github/review/**` | Build + push the roborev review image to the CI-account ECR |
+| `e2e-karpenter.yml` | `workflow_dispatch` | Attachable entrypoint: fresh EKS+Karpenter deploy → test → teardown |
+| `e2e-karpenter-fresh.yml` | `workflow_call` / `workflow_dispatch` | Pipeline: build-image → deploy → test (non-mutating + mutating) → cleanup |
+| `e2e-karpenter-job.yml` | `workflow_call` | Reusable: run the e2e suite against a live cluster |
+| `e2e-karpenter-build-image.yml` | `workflow_call` | Build + push the e2e container image to the CI ECR |
+| `e2e-karpenter-cleanup.yml` | `workflow_dispatch` | Nuclear reaper: tear down ALL karpenter e2e deployments in the store |
 
 This is a **single-package** uv workspace, so `ci.yml` runs lint/test against the repo root
 (`working-directory: '.'`) — there is no affected-dirs discovery/matrix like jupyter-deploy has.
+
+See [SETUP.md](SETUP.md) for the one-time CI-account setup (IAM roles, repo variables,
+environments) these workflows depend on.
 
 Both `lint.yml` and `test.yml` run a `['3.12', '3.13']` python matrix and install **unpinned**
 deps (`rm -f uv.lock && uv sync --all-extras`) so CI catches upstream breakage early. CI pins
@@ -59,6 +67,18 @@ trust only proves a job *declared* the `review` environment, not that the workfl
 
 Smoke-test the OIDC→Bedrock chain without running a real review via the `workflow_dispatch`
 `smoke: true` input.
+
+## E2E (karpenter)
+
+`e2e-karpenter.yml` deploys a fresh EKS+Karpenter cluster, runs the suite (non-mutating then
+mutating), and tears it down. Notable choices:
+
+- **Published `jd`, not a checkout** — jobs `uv sync --all-packages`, which installs
+  `jupyter-deploy` from PyPI (what users get) + this template. CI helpers vendored in `scripts/ci_helpers.py`.
+- **No concurrency group** — deploys are self-isolated by `random_id`, so parallel runs don't
+  collide. Teardown is scoped to each run's own `deployment_id`; `e2e-karpenter-cleanup.yml` is
+  the only reap-ALL path (for orphans).
+- Everything is `-karpenter`-scoped so a future template adds its own set with no collisions.
 
 ## CI infrastructure account
 
