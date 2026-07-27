@@ -150,6 +150,12 @@ jobs:
   test-non-mutating:
     name: "E2E tests (non-mutating)"
     needs: [build-image, deploy, deploy-gate]
+    # deploy is skipped in skip-deployment mode; without an explicit condition a
+    # skipped need would cascade-skip this job. Gate on deploy-gate (which is
+    # if: always() and already fails the chain on a real deploy failure) so tests
+    # run in both fresh-deploy and skip-deployment modes. deploy stays in needs
+    # only to read its deployment-id output (empty in skip mode → sole-project restore).
+    if: ${{ !cancelled() && needs.deploy-gate.result == 'success' }}
     uses: ./.github/workflows/e2e-karpenter-job.yml
     with:
       test-filter: ${{ inputs.test-filter }}
@@ -168,6 +174,9 @@ jobs:
   test-mutating:
     name: "E2E tests (mutating)"
     needs: [build-image, deploy, test-non-mutating]
+    # Same as test-non-mutating: gate explicitly so a skipped deploy (skip-deployment
+    # mode) doesn't cascade-skip this job. Runs after the non-mutating suite passes.
+    if: ${{ !cancelled() && needs.test-non-mutating.result == 'success' }}
     uses: ./.github/workflows/e2e-karpenter-job.yml
     with:
       test-filter: ${{ inputs.test-filter }}

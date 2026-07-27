@@ -149,6 +149,10 @@ project for descriptions and recommended values. Grouped by concern:
 | `vpc_id` | VPC ID |
 | `kubeconfig_path` | Path to the generated kubeconfig |
 | `model_store_bucket` / `model_store_bucket_arn` | S3 bucket for serving weights |
+| `batch_intake_bucket` / `batch_intake_bucket_arn` | S3 bucket batch-inference requests flow into |
+| `batch_output_bucket` / `batch_output_bucket_arn` | S3 bucket batch-inference results and metrics land in |
+| `batch_inference_service_account_name` | Service account with batch S3 access via Pod Identity |
+| `batch_storage_config_map_name` | ConfigMap of batch bucket names and AWS Region |
 | `models_s3_uri` / `onboarder_input_s3_uri` / `onboarder_output_s3_uri` | Model-onboarding S3 locations |
 | `onboarder_codebuild_project` | CodeBuild project that stages models/images |
 | `ecr_registry` / `workload_repo_prefix` | ECR registry + workload repo prefix |
