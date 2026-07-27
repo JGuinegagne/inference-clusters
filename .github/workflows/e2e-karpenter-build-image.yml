@@ -44,6 +44,13 @@ jobs:
       - name: Install dependencies
         run: uv sync --all-packages
 
+      # ci-restore runs `jd config --restore-secrets`, which shells out to terraform.
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.5.7"
+          terraform_wrapper: false
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
