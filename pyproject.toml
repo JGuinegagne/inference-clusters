@@ -59,9 +59,11 @@ exclude = [
 [tool.pytest.ini_options]
 pythonpath = [
     "libs/inference-tf-aws-eks-karpenter",
+    "scripts",
 ]
 testpaths = [
     "libs/inference-tf-aws-eks-karpenter/tests/unit",
+    "tests/unit",
 ]
 markers = [
     "e2e: End-to-end tests against a (real or scaffolded) deployment (deselect with '-m \"not e2e\"')",
