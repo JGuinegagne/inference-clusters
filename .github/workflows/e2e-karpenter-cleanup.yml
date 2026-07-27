@@ -1,0 +1,54 @@
+name: "E2E Karpenter — cleanup all"
+
+# Standalone reaper (req c): find + tear down + delete EVERY tf-aws-eks-karpenter-*
+# deployment in the store, independent of any PR. Use to clean up orphans left by an
+# interrupted run (infra alive but no in-flight workflow to tear it down).
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  cleanup-all:
+    name: "Reap all karpenter deployments"
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    environment: e2e
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install UV and Python
+        uses: ./.github/actions/install-uv
+        with:
+          python-version: "3.13"
+
+      - name: Install just
+        uses: ./.github/actions/install-just
+
+      - name: Install dependencies
+        run: uv sync --all-packages
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.5.7"
+          terraform_wrapper: false
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_E2E_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-duration-seconds: 7200
+
+      - name: Restore CI project
+        run: just ci-restore sandbox-ci
+
+      - name: Reap all karpenter deployments
+        run: just find-takedown-karpenter sandbox-e2e

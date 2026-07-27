@@ -1,0 +1,232 @@
+name: "E2E Karpenter (fresh deploy)"
+
+# Deploy a fresh EKS + Karpenter cluster, run the e2e suite against it, tear it down.
+# Uses the published jupyter-deploy CLI (from PyPI, installed in this workspace) — the
+# same version users get on `pip install`.
+on:
+  workflow_call:
+    inputs:
+      test-filter:
+        description: "Pytest -k filter (empty = all tests)"
+        required: false
+        type: string
+        default: ""
+      skip-deployment:
+        description: "Skip cleanup + deploy, run tests only (project must already be in the store)"
+        required: false
+        type: boolean
+        default: false
+      destroy-after:
+        description: "Tear down the cluster after tests (success OR failure)"
+        required: false
+        type: boolean
+        default: true
+      ref:
+        description: "Git ref to checkout (e.g. refs/pull/NN/merge)"
+        required: false
+        type: string
+        default: ""
+  workflow_dispatch:
+    inputs:
+      test-filter:
+        description: "Pytest -k filter (empty = all tests)"
+        required: false
+        type: string
+        default: ""
+      skip-deployment:
+        description: "Skip cleanup + deploy, run tests only (project must already be in the store)"
+        required: false
+        type: boolean
+        default: false
+      destroy-after:
+        description: "Tear down the cluster after tests (success OR failure)"
+        required: false
+        type: boolean
+        default: true
+      ref:
+        description: "Git ref to checkout (e.g. refs/pull/NN/merge)"
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  id-token: write
+  contents: read
+
+# No concurrency group: each run deploys a fully self-isolated cluster (unique
+# random_id → tf-aws-eks-karpenter-<deployment_id>), so parallel PR runs never collide.
+# Concurrency is bounded in practice by AWS quota (VPCs/region). Teardown is scoped to
+# each run's own deployment_id; the standalone e2e-karpenter-cleanup.yml is the only
+# reap-all path.
+
+jobs:
+  build-image:
+    name: "Build e2e image"
+    uses: ./.github/workflows/e2e-karpenter-build-image.yml
+    with:
+      ref: ${{ inputs.ref }}
+    permissions:
+      id-token: write
+      contents: read
+
+  deploy:
+    name: "Deploy from scratch"
+    needs: [build-image]
+    if: ${{ !inputs.skip-deployment }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    environment: e2e
+    permissions:
+      id-token: write
+      contents: read
+    outputs:
+      deployment-id: ${{ steps.deploy.outputs.deployment_id }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: Install UV and Python
+        uses: ./.github/actions/install-uv
+        with:
+          python-version: "3.13"
+
+      - name: Install just
+        uses: ./.github/actions/install-just
+
+      - name: Install dependencies
+        run: uv sync --all-packages
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.5.7"
+          terraform_wrapper: false
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_E2E_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-duration-seconds: 7200
+
+      - name: Restore CI project
+        run: just ci-restore sandbox-ci
+
+      - name: Pull pre-built e2e image
+        run: just ci-e2e-karpenter-pull ${{ needs.build-image.outputs.ecr-tag }} sandbox-ci
+
+      # Deploy from INSIDE the pre-built container. jd init/config/up run as explicit
+      # log-streaming steps; the job timeout bounds the ~20-30 min EKS+Karpenter apply.
+      # Emits deployment_id (this run's random_id) so downstream jobs scope to it.
+      - name: Deploy (jd init / config / up)
+        id: deploy
+        run: just ci-e2e-karpenter-deploy sandbox-e2e
+
+      - name: Upload test results to S3
+        if: failure()
+        continue-on-error: true
+        run: just ci-upload-test-results sandbox-ci
+
+  deploy-gate:
+    name: "Deploy gate"
+    needs: [build-image, deploy]
+    if: always() && !cancelled()
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - name: Check deploy result
+        run: |
+          if [ "${{ inputs.skip-deployment }}" = "true" ]; then
+            echo "Deployment skipped — proceeding to tests"
+          elif [ "${{ needs.deploy.result }}" = "success" ]; then
+            echo "Deployment succeeded — proceeding to tests"
+          else
+            echo "Deployment failed or was cancelled — aborting test chain"
+            exit 1
+          fi
+
+  test-non-mutating:
+    name: "E2E tests (non-mutating)"
+    needs: [build-image, deploy, deploy-gate]
+    uses: ./.github/workflows/e2e-karpenter-job.yml
+    with:
+      test-filter: ${{ inputs.test-filter }}
+      ref: ${{ inputs.ref }}
+      ecr-tag: ${{ needs.build-image.outputs.ecr-tag }}
+      deployment-id: ${{ needs.deploy.outputs.deployment-id }}
+      timeout-minutes: 120
+    permissions:
+      id-token: write
+      contents: read
+
+  # Mutating tests run in a SEPARATE step, after the non-mutating suite — they change
+  # infra config (instance types, operators re-applied), so isolating them keeps a
+  # failure attributable and avoids mutating state the non-mutating suite reads.
+  # Selected by the `mutating` marker so new mutating tests are picked up automatically.
+  test-mutating:
+    name: "E2E tests (mutating)"
+    needs: [build-image, deploy, test-non-mutating]
+    uses: ./.github/workflows/e2e-karpenter-job.yml
+    with:
+      test-filter: ${{ inputs.test-filter }}
+      marker: mutating
+      mutate: true
+      ref: ${{ inputs.ref }}
+      ecr-tag: ${{ needs.build-image.outputs.ecr-tag }}
+      deployment-id: ${{ needs.deploy.outputs.deployment-id }}
+      timeout-minutes: 60
+    permissions:
+      id-token: write
+      contents: read
+
+  cleanup:
+    name: "Cleanup: destroy cluster"
+    needs: [deploy, test-non-mutating, test-mutating]
+    # Tear down THIS run's deployment on success OR failure (no LE constraint → always
+    # destroy). Scoped to the run's own deployment_id, so parallel runs never reap each
+    # other. Skipped only when there was no deploy (skip-deployment) or no id was captured.
+    if: always() && inputs.destroy-after && needs.deploy.result != 'skipped' && needs.deploy.outputs.deployment-id != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    continue-on-error: true
+    environment: e2e
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: Install UV and Python
+        uses: ./.github/actions/install-uv
+        with:
+          python-version: "3.13"
+
+      - name: Install just
+        uses: ./.github/actions/install-just
+
+      - name: Install dependencies
+        run: uv sync --all-packages
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.5.7"
+          terraform_wrapper: false
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_E2E_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-duration-seconds: 7200
+
+      - name: Restore CI project
+        run: just ci-restore sandbox-ci
+
+      - name: Take down this run's deployment
+        run: just find-takedown-karpenter sandbox-e2e ${{ needs.deploy.outputs.deployment-id }}

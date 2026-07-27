@@ -1,0 +1,15 @@
+# Build context excludes: keep the image lean and cache-stable.
+.venv
+**/.venv
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.ruff_cache
+.mypy_cache
+test-results
+.auth
+sandbox*
+.git
+dist
+build
+**/*.egg-info

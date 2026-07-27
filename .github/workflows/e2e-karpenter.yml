@@ -1,0 +1,45 @@
+name: "E2E Karpenter"
+
+# Attachable entrypoint (req a): manually run the full fresh-deploy → test → teardown
+# pipeline against any branch. Dispatch from the Actions tab and pick the branch via
+# the ref input (defaults to the branch the workflow is run from).
+on:
+  workflow_dispatch:
+    inputs:
+      test-filter:
+        description: "Pytest -k filter (empty = all tests)"
+        required: false
+        type: string
+        default: ""
+      skip-deployment:
+        description: "Skip cleanup + deploy, run tests only (project must already be in the store)"
+        required: false
+        type: boolean
+        default: false
+      destroy-after:
+        description: "Tear down the cluster after tests (success OR failure)"
+        required: false
+        type: boolean
+        default: true
+      ref:
+        description: "Git ref to checkout (e.g. refs/pull/NN/merge; empty = this branch)"
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  fresh:
+    name: "Fresh deploy + test + teardown"
+    uses: ./.github/workflows/e2e-karpenter-fresh.yml
+    with:
+      test-filter: ${{ inputs.test-filter }}
+      skip-deployment: ${{ inputs.skip-deployment }}
+      destroy-after: ${{ inputs.destroy-after }}
+      ref: ${{ inputs.ref }}
+    permissions:
+      id-token: write
+      contents: read
