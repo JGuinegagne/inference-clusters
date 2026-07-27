@@ -122,6 +122,11 @@ jobs:
       # Emits deployment_id (this run's random_id) so downstream jobs scope to it.
       - name: Deploy (jd init / config / up)
         id: deploy
+        # Grant the operator roles EKS cluster-admin so a human can tear a CI cluster
+        # down locally. DeployRole is Admin-assumed and escapes the Isengard session
+        # policy that denies iam:DeleteRole on recently-used roles (which blocks jd down).
+        env:
+          JD_E2E_VAR_ADMIN_ROLE_NAMES: '["Admin", "DeployRole"]'
         run: just ci-e2e-karpenter-deploy sandbox-e2e
 
       - name: Upload test results to S3

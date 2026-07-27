@@ -4,4 +4,9 @@ schema_version: 2
 # Multinode operators (Kueue/LWS) are NOT enabled here — tests that need them
 # use update_override_value to add them on top of the base cluster.
 required: {}
-overrides: {}
+overrides:
+  # EKS cluster-admin access entries. The deploying CI caller (the e2e OIDC role) is
+  # auto-merged by the template; this list adds operator roles a human uses to tear
+  # the cluster down locally. Interpolated by `envsubst` from JD_E2E_VAR_ADMIN_ROLE_NAMES
+  # (passed by the deploy workflow); defaults to ["Admin"] when unset.
+  admin_role_names: ${JD_E2E_VAR_ADMIN_ROLE_NAMES}

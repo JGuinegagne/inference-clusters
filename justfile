@@ -247,8 +247,13 @@ ci-e2e-karpenter-deploy project_dir=e2e-dir:
     EXEC="{{container-tool}} compose --project-directory $ROOT $E2E_COMPOSE exec -e PYTHONUNBUFFERED=1 e2e bash -c"
     echo "=== jd init ==="
     $EXEC ". .venv/bin/activate && cd /workspace && jupyter-deploy init -E terraform -P aws -I eks -T karpenter {{project_dir}}"
-    echo "=== copy deploy config (base.yaml) into the project ==="
-    cp "$ROOT/libs/inference-tf-aws-eks-karpenter/tests/e2e/configurations/base.yaml" "$ROOT/{{project_dir}}/variables.yaml"
+    echo "=== render deploy config (base.yaml) into the project ==="
+    # base.yaml interpolates ${JD_E2E_VAR_ADMIN_ROLE_NAMES} (envsubst). The workflow passes
+    # operator roles so a human can tear a CI cluster down locally; default to [] (the
+    # template default — the deploying caller is auto-merged as admin regardless).
+    : "${JD_E2E_VAR_ADMIN_ROLE_NAMES:=[]}"
+    export JD_E2E_VAR_ADMIN_ROLE_NAMES
+    envsubst < "$ROOT/libs/inference-tf-aws-eks-karpenter/tests/e2e/configurations/base.yaml" > "$ROOT/{{project_dir}}/variables.yaml"
     echo "=== jd config ==="
     $EXEC ". .venv/bin/activate && cd /workspace/{{project_dir}} && jupyter-deploy config -v"
     echo "=== jd up ==="
