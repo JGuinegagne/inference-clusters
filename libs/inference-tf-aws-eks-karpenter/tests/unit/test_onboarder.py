@@ -100,6 +100,7 @@ class TestPureCore(unittest.TestCase):
 
     def test_weight_name_from_source(self) -> None:
         self.assertEqual(co.weight_name_from_source("hf://google/Gemma-2-9b"), "gemma-2-9b")
+        self.assertEqual(co.weight_name_from_source("hf://google/Gemma-2-9b@abc123"), "gemma-2-9b")
         self.assertEqual(co.weight_name_from_source("s3://b/pre/My-Model/"), "my-model")
 
     def test_split_weight_entry(self) -> None:
