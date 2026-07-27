@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: batch-s3-e2e
+  namespace: ${NAMESPACE}
+spec:
+  restartPolicy: Never
+  serviceAccountName: ${SERVICE_ACCOUNT}
+  containers:
+    - name: aws-cli
+      image: ${AWS_CLI_IMAGE}
+      command: ["/bin/sh", "-c"]
+      args: ["sleep 3600"]
+      envFrom:
+        - configMapRef:
+            name: ${CONFIG_MAP}

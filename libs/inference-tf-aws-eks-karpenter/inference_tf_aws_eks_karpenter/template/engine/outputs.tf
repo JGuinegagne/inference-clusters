@@ -40,13 +40,48 @@ output "kubeconfig_path" {
 }
 
 output "model_store_bucket" {
-  description = "Name of the shared S3 model/data store bucket (weights under models/, batch under intake/+output/)."
+  description = "Name of the shared S3 model store bucket (weights under models/)."
   value       = module.model_store.bucket_name
 }
 
 output "model_store_bucket_arn" {
-  description = "ARN of the shared S3 model/data store bucket."
+  description = "ARN of the shared S3 model store bucket."
   value       = module.model_store.bucket_arn
+}
+
+output "batch_intake_bucket" {
+  description = "Name of the S3 bucket batch-inference requests flow into."
+  value       = module.batch_intake.bucket_name
+}
+
+output "batch_intake_bucket_arn" {
+  description = "ARN of the S3 batch-inference intake bucket."
+  value       = module.batch_intake.bucket_arn
+}
+
+output "batch_output_bucket" {
+  description = "Name of the S3 bucket batch-inference results and metrics land in."
+  value       = module.batch_output.bucket_name
+}
+
+output "batch_output_bucket_arn" {
+  description = "ARN of the S3 batch-inference output bucket."
+  value       = module.batch_output.bucket_arn
+}
+
+output "batch_inference_service_account_name" {
+  description = "Name of the service account that has batch S3 access through Pod Identity."
+  value       = kubernetes_service_account_v1.batch_inference.metadata[0].name
+}
+
+output "batch_storage_config_map_name" {
+  description = "Name of the ConfigMap that contains the batch bucket names and AWS Region."
+  value       = kubernetes_config_map_v1.batch_storage.metadata[0].name
+}
+
+output "workload_namespace" {
+  description = "Namespace for inference workloads and shared batch resources."
+  value       = kubernetes_namespace_v1.workload.metadata[0].name
 }
 
 output "keda_namespace" {

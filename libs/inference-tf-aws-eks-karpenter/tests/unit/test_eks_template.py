@@ -247,10 +247,42 @@ def test_ec2nodeclass_imds_hop_limit_allows_pod_creds() -> None:
 
 
 def test_node_s3_grant_scoped_to_bucket_not_star() -> None:
-    """The node-role S3 grant (S3-direct path) MUST be scoped to the bucket ARN, never `*`."""
+    """The node-role model-store grant MUST be read-only and scoped to the bucket ARN, never `*`."""
     block = _extract_block((ENGINE / "platform_storage.tf").read_text(), "data", "aws_iam_policy_document", "node_s3")
     assert "module.model_store.bucket_arn" in block and '"*"' not in block
-    assert "s3:GetObject" in block and "s3:PutObject" in block and "output" in block
+    assert "s3:GetObject" in block
+    assert "s3:PutObject" not in block and "s3:DeleteObject" not in block, "model store is read-only for nodes"
+
+
+def test_batch_intake_and_output_are_dedicated_buckets() -> None:
+    """Batch intake and output MUST be separate s3_bucket module instances with distinct names."""
+    content = (ENGINE / "platform_storage.tf").read_text()
+    for name, suffix in (("batch_intake", "-batch-in"), ("batch_output", "-batch-out")):
+        match = re.search(rf'module\s+"{name}"\s*\{{.*?\n\}}', content, re.DOTALL)
+        assert match is not None, f"module.{name} not found"
+        block = match.group(0)
+        assert "./modules/s3_bucket" in block
+        assert suffix in block and "resource_name_prefix" in block
+
+
+def test_batch_buckets_expire_current_and_noncurrent_objects() -> None:
+    """Each batch bucket MUST configure retention through the shared S3 bucket module."""
+    content = (ENGINE / "platform_storage.tf").read_text()
+    for bucket in ("batch_intake", "batch_output"):
+        match = re.search(rf'module\s+"{bucket}"\s*\{{.*?\n\}}', content, re.DOTALL)
+        assert match is not None, f"module.{bucket} not found"
+        block = match.group(0)
+        assert "lifecycle_rule" in block
+
+    module = ENGINE / "modules" / "s3_bucket"
+    module_main = (module / "main.tf").read_text()
+    module_variables = (module / "variables.tf").read_text()
+    assert 'variable "lifecycle_rule"' in module_variables
+    lifecycle = _resource(module_main, "aws_s3_bucket_lifecycle_configuration", "this")
+    assert "var.lifecycle_rule" in lifecycle
+    assert "aws_s3_bucket_versioning.this" in lifecycle
+    assert "aws:SecureTransport" in module_main
+    assert re.search(r'values\s+= \["false"\]', module_main)
 
 
 def test_onboarder_iam_scopes_workload_ecr_and_bucket() -> None:
