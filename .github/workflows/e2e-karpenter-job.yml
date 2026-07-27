@@ -83,24 +83,37 @@ jobs:
         run: just ci-restore sandbox-ci
 
       - name: Restore karpenter e2e project
-        run: just ci-restore-karpenter sandbox-e2e ${{ inputs.deployment-id }}
+        env:
+          DEPLOYMENT_ID: ${{ inputs.deployment-id }}
+        run: just ci-restore-karpenter sandbox-e2e "$DEPLOYMENT_ID"
 
       - name: Pull pre-built e2e image
-        run: just ci-e2e-karpenter-pull ${{ inputs.ecr-tag }} sandbox-ci
+        env:
+          ECR_TAG: ${{ inputs.ecr-tag }}
+        run: just ci-e2e-karpenter-pull "$ECR_TAG" sandbox-ci
 
       - name: Build test options
         id: opts
+        # Inputs are referenced via env, never interpolated into the script body:
+        # GitHub expands ${{ }} as literal text before the shell parses it, so an
+        # interpolated workflow_dispatch input could inject shell commands into this
+        # privileged job. Shell variables are not re-parsed.
+        env:
+          MUTATE: ${{ inputs.mutate }}
+          MARKER: ${{ inputs.marker }}
         run: |
           OPTIONS="full-deploy=true,skip-sync=true"
-          if [ "${{ inputs.mutate }}" = "true" ]; then OPTIONS="mutate=true,${OPTIONS}"; fi
-          if [ -n "${{ inputs.marker }}" ]; then OPTIONS="marker=${{ inputs.marker }},${OPTIONS}"; fi
+          if [ "$MUTATE" = "true" ]; then OPTIONS="mutate=true,${OPTIONS}"; fi
+          if [ -n "$MARKER" ]; then OPTIONS="marker=${MARKER},${OPTIONS}"; fi
           echo "options=${OPTIONS}" >> "$GITHUB_OUTPUT"
 
       - name: Run e2e tests
+        # See "Build test options": inputs go through env, not the script body.
+        env:
+          TEST_FILTER: ${{ inputs.test-filter }}
+          OPTIONS: ${{ steps.opts.outputs.options }}
         run: >-
-          just test-e2e-eks-karpenter sandbox-e2e
-          "${{ inputs.test-filter }}"
-          "${{ steps.opts.outputs.options }}"
+          just test-e2e-eks-karpenter sandbox-e2e "$TEST_FILTER" "$OPTIONS"
 
       - name: Upload test artifacts
         if: always()
