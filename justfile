@@ -234,6 +234,11 @@ ci-e2e-karpenter-deploy project_dir=e2e-dir:
     if [ -z "${AWS_REGION:-}" ]; then echo "Error: AWS_REGION is not set"; exit 1; fi
     export AWS_REGION
     mkdir -p "$ROOT/{{project_dir}}"
+    # The vended base compose declares `env_file: ./.env`, so the file must exist or
+    # `compose up` errors. CI has no e2e-up step to seed it; create it from env.example.
+    # AWS creds/region and HOST_UID/GID reach the container via shell-env interpolation
+    # (exported by configure-aws-credentials + the justfile), which takes precedence.
+    [ -f "$ROOT/.env" ] || cp "$ROOT/env.example" "$ROOT/.env"
     E2E_IMAGE_DIR="$(uv run python -c 'from pytest_jupyter_deploy.image import IMAGE_PATH; print(IMAGE_PATH)')"
     E2E_COMPOSE="-f $E2E_IMAGE_DIR/docker-compose.yml -f $ROOT/docker-compose.e2e-name.yml"
     OVERRIDE_FILE="$ROOT/docker-compose.e2e-override.yml"
@@ -473,6 +478,10 @@ test-e2e project_dir="sandbox-e2e" test_filter="" options="" template=default-te
     OVERRIDE_FILE=""
     cleanup() { [ -n "$OVERRIDE_FILE" ] && [ -f "$OVERRIDE_FILE" ] && rm -f "$OVERRIDE_FILE"; }
     trap cleanup EXIT
+
+    # The vended base compose declares `env_file: ./.env`, so the file must exist or
+    # `compose up` errors. In CI (test job) there is no e2e-up step to seed it.
+    [ -f "{{justfile_directory()}}/.env" ] || cp "{{justfile_directory()}}/env.example" "{{justfile_directory()}}/.env"
 
     E2E_IMAGE_DIR="$(uv run python -c 'from pytest_jupyter_deploy.image import IMAGE_PATH; print(IMAGE_PATH)')"
     E2E_COMPOSE_FILES="-f $E2E_IMAGE_DIR/docker-compose.yml -f {{justfile_directory()}}/docker-compose.e2e-name.yml"
