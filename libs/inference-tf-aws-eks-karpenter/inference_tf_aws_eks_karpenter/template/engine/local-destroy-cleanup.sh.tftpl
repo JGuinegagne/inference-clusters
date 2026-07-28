@@ -14,6 +14,7 @@ set -euo pipefail
 
 CLUSTER_NAME="${cluster_name}"
 REGION="${region}"
+VPC_ID="${vpc_id}"
 MAX_WAIT_SECONDS=600
 SLEEP_INTERVAL=15
 
@@ -84,9 +85,37 @@ if [ -n "$orphans" ]; then
   done
   # shellcheck disable=SC2086
   aws ec2 terminate-instances --region "$REGION" --instance-ids $orphans 2>&1 || true
-  echo "[karpenter-drain] termination requested; ENIs release asynchronously."
+  echo "[karpenter-drain] waiting for terminated instances before reaping their ENIs..."
+  # shellcheck disable=SC2086
+  aws ec2 wait instance-terminated --region "$REGION" --instance-ids $orphans 2>&1 || true
 else
   echo "[karpenter-drain] no orphaned Karpenter instances found."
+fi
+
+# --- Phase 4: reap leftover VPC CNI ENIs (unblocks subnet deletion) ---
+# The VPC CNI attaches secondary ENIs to nodes for pod IPs. These are created
+# out-of-band, so they are NOT in Terraform state. After a node terminates its
+# secondary ENIs release ASYNCHRONOUSLY and can linger in "available" state — and the
+# subnet destroy that follows then fails with DependencyViolation. Delete any available
+# ENI still in this VPC so `aws_subnet.private` can be destroyed. Scoped by vpc-id +
+# status=available (matches the eks-oidc template's proven filter); runs unconditionally
+# so a re-run after a previously-incomplete destroy also clears orphans. No-op on a
+# clean drain. NB: a bare `sleep` also lets any Phase-2 API-drained node's ENIs settle.
+echo "[karpenter-drain] waiting 15s for ENIs to release, then reaping any left in $VPC_ID..."
+sleep 15
+eni_ids="$(aws ec2 describe-network-interfaces \
+  --region "$REGION" \
+  --filters "Name=vpc-id,Values=$VPC_ID" "Name=status,Values=available" \
+  --query "NetworkInterfaces[].NetworkInterfaceId" \
+  --output text 2>/dev/null | tr '\t' ' ')"
+if [ -n "$eni_ids" ]; then
+  for eni in $eni_ids; do
+    echo "[karpenter-drain]   deleting orphaned ENI $eni"
+    aws ec2 delete-network-interface --region "$REGION" --network-interface-id "$eni" 2>&1 || true
+  done
+  echo "[karpenter-drain] ENI cleanup complete."
+else
+  echo "[karpenter-drain] no orphaned ENIs found."
 fi
 
 rm -f "$KUBECONFIG" 2>/dev/null || true
