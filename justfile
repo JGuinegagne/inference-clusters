@@ -117,12 +117,10 @@ ci-review-pull ecr_url tag="latest":
 # These recipes run in CI (e2e-karpenter-*.yml). They use the published `jd` CLI
 # installed in this workspace (jupyter-deploy from PyPI — the same version users
 # get), driving it with `uv run jd`. The restore/takedown entrypoints live in this
-# repo's scripts/ (importing the vendored scripts/ci_helpers.py). All template-scoped
-# with a -karpenter suffix so a future template adds its own set.
+# repo's scripts/ (importing the vendored scripts/ci_helpers.py).
 
 ci-dir := "sandbox-ci"
 e2e-dir := "sandbox-e2e"
-e2e-karpenter-image := "inference-e2e-karpenter"
 
 # Restore the CI infra project (tf-aws-iam-ci) from the S3 store (reads its outputs)
 ci-restore ci_dir=ci-dir:
@@ -178,7 +176,7 @@ ci-e2e-karpenter-pull tag="latest" ci_dir=ci-dir:
     REGION=$(echo "$ECR_URL" | cut -d'.' -f4)
     aws ecr get-login-password --region "$REGION" | {{container-tool}} login --username AWS --password-stdin "$REGISTRY"
     {{container-tool}} pull "$ECR_URL:{{tag}}" || true
-    {{container-tool}} tag "$ECR_URL:{{tag}}" {{e2e-karpenter-image}}:latest 2>/dev/null || true
+    {{container-tool}} tag "$ECR_URL:{{tag}}" {{e2e-container-name}}:{{e2e-image-tag}} 2>/dev/null || true
 
 # Build the e2e image: the pytest-jupyter-deploy base (system tooling) then this repo's
 # .github/e2e/Dockerfile on top (bakes in the workspace env: the published jd CLI + this
@@ -191,21 +189,21 @@ ci-e2e-karpenter-build cache_from="":
     BASE_DOCKERFILE=$(uv run python -c \
         "from pytest_jupyter_deploy.image import IMAGE_PATH; print(IMAGE_PATH / 'Dockerfile')")
     BASE_DIR=$(dirname "$BASE_DOCKERFILE")
-    echo "Building base image {{e2e-karpenter-image}}:base ..."
+    echo "Building base image {{e2e-container-name}}:base ..."
     {{container-tool}} build \
         -f "$BASE_DOCKERFILE" \
         --build-arg USER_UID={{HOST_UID}} \
         --build-arg USER_GID={{HOST_GID}} \
-        -t {{e2e-karpenter-image}}:base \
+        -t {{e2e-container-name}}:base \
         "$BASE_DIR"
     CACHE_ARG=""
     if [ -n "{{cache_from}}" ]; then CACHE_ARG="--cache-from={{cache_from}}"; fi
-    echo "Building e2e image {{e2e-karpenter-image}}:latest ..."
+    echo "Building e2e image {{e2e-container-name}}:latest ..."
     {{container-tool}} build \
         -f "$ROOT/.github/e2e/Dockerfile" \
-        --build-arg BASE_IMAGE={{e2e-karpenter-image}}:base \
+        --build-arg BASE_IMAGE={{e2e-container-name}}:base \
         $CACHE_ARG \
-        -t {{e2e-karpenter-image}}:latest \
+        -t {{e2e-container-name}}:latest \
         "$ROOT"
 
 # Push the e2e image to ECR (:latest and optional extra tag, e.g. git sha)
@@ -216,10 +214,10 @@ ci-e2e-karpenter-push extra_tag="" ci_dir=ci-dir:
     REGISTRY=$(echo "$ECR_URL" | cut -d'/' -f1)
     REGION=$(echo "$ECR_URL" | cut -d'.' -f4)
     aws ecr get-login-password --region "$REGION" | {{container-tool}} login --username AWS --password-stdin "$REGISTRY"
-    {{container-tool}} tag {{e2e-karpenter-image}}:latest "$ECR_URL:latest"
+    {{container-tool}} tag {{e2e-container-name}}:latest "$ECR_URL:latest"
     {{container-tool}} push "$ECR_URL:latest"
     if [ -n "{{extra_tag}}" ]; then
-        {{container-tool}} tag {{e2e-karpenter-image}}:latest "$ECR_URL:{{extra_tag}}"
+        {{container-tool}} tag {{e2e-container-name}}:latest "$ECR_URL:{{extra_tag}}"
         {{container-tool}} push "$ECR_URL:{{extra_tag}}"
     fi
 
@@ -242,10 +240,10 @@ ci-e2e-karpenter-deploy project_dir=e2e-dir:
     E2E_IMAGE_DIR="$(uv run python -c 'from pytest_jupyter_deploy.image import IMAGE_PATH; print(IMAGE_PATH)')"
     E2E_COMPOSE="-f $E2E_IMAGE_DIR/docker-compose.yml -f $ROOT/docker-compose.e2e-name.yml"
     OVERRIDE_FILE="$ROOT/docker-compose.e2e-override.yml"
-    printf 'services:\n  e2e:\n    image: {{e2e-karpenter-image}}:latest\n    volumes:\n      - ./{{project_dir}}:/workspace/{{project_dir}}\n' > "$OVERRIDE_FILE"
+    printf 'services:\n  e2e:\n    image: {{e2e-container-name}}:latest\n    volumes:\n      - ./{{project_dir}}:/workspace/{{project_dir}}\n' > "$OVERRIDE_FILE"
     trap 'rm -f "$OVERRIDE_FILE"' EXIT
     mkdir -p "$HOME/.kube"
-    export E2E_IMAGE="{{e2e-karpenter-image}}:latest"
+    export E2E_IMAGE="{{e2e-container-name}}:latest"
     {{container-tool}} compose --project-directory "$ROOT" $E2E_COMPOSE down
     {{container-tool}} compose --project-directory "$ROOT" $E2E_COMPOSE -f "$OVERRIDE_FILE" up -d --no-build
     just e2e-ensure-helm
