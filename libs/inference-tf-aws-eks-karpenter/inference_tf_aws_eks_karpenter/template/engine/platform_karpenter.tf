@@ -201,6 +201,7 @@ resource "null_resource" "karpenter_drain" {
     script = templatefile("${path.module}/local-destroy-cleanup.sh.tftpl", {
       cluster_name = module.eks_cluster.cluster_name
       region       = var.region
+      vpc_id       = module.vpc.vpc_id
     })
   }
 
