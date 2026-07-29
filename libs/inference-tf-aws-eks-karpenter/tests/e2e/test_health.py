@@ -12,6 +12,7 @@ with `--with-full-deployment`).
 """
 
 import json
+import time
 
 import pytest
 from pytest_jupyter_deploy.deployment import EndToEndDeployment
@@ -75,16 +76,44 @@ def test_health_cluster_layer(e2e_deployment: EndToEndDeployment) -> None:
 _GPU_DAEMONSET_COMPONENTS = {"dcgm-exporter", "nvidia-device-plugin"}
 
 
+def _components_layers(e2e_deployment: EndToEndDeployment) -> list[dict]:
+    """One `jd health --components --json` snapshot of the component rows."""
+    data = json.loads(e2e_deployment.cli.run_command(["jupyter-deploy", "health", "--components", "--json"]).stdout)
+    layers: list[dict] = data["layers"]
+    return layers
+
+
 @pytest.mark.full_deployment
 def test_health_components_layer(e2e_deployment: EndToEndDeployment) -> None:
     """--components returns one row per manifest component; all healthy EXCEPT the GPU-only
-    DaemonSets, which read Degraded on a GPU-less cluster (their HelmRelease twins stay healthy)."""
+    DaemonSets, which read Degraded on a GPU-less cluster (their HelmRelease twins stay healthy).
+
+    Poll-until-converged: the per-node node-exporter DaemonSet reads Degraded for a beat when
+    a Karpenter node has just joined (desired count bumped, new pod still pulling its image /
+    not yet Ready) — `jd health` is a single-shot snapshot, so a bare read can catch that
+    window. We re-read until every must-be-healthy component converges; a genuinely broken
+    component still fails once the budget elapses. Mirrors the poll loops used across this
+    suite (see test_keda_scale_from_zero, _serving_helpers)."""
     e2e_deployment.ensure_deployed()
 
     manifest_components = e2e_deployment.get_manifest().get_components()
 
-    data = json.loads(e2e_deployment.cli.run_command(["jupyter-deploy", "health", "--components", "--json"]).stdout)
-    layers = data["layers"]
+    # DaemonSets on a node that just joined (or, for the GPU-only ones, that has no node at all)
+    # converge on their own schedule; give them a margin over image-pull + node-join before we
+    # trust a Degraded read.
+    interval_s = 5
+    deadline = time.monotonic() + 90
+    layers = _components_layers(e2e_deployment)
+    while True:
+        must_be_healthy = [
+            e for e in layers if e["name"] not in _GPU_DAEMONSET_COMPONENTS and not e["name"].endswith("-chart")
+        ]
+        # -chart HelmRelease twins are pod-count-agnostic and must be healthy too, but they are
+        # not subject to the node-join race, so they gate on the same converged snapshot below.
+        if all(e["status_category"] == "healthy" for e in must_be_healthy) or time.monotonic() >= deadline:
+            break
+        time.sleep(interval_s)
+        layers = _components_layers(e2e_deployment)
 
     assert len(layers) == len(manifest_components), (
         f"expected {len(manifest_components)} component rows, got {len(layers)}"
@@ -104,7 +133,7 @@ def test_health_components_layer(e2e_deployment: EndToEndDeployment) -> None:
             )
         else:
             assert entry["status_category"] == "healthy", (
-                f"component '{entry['name']}' not healthy: {entry['status_category']}"
+                f"component '{entry['name']}' not healthy: {entry['status_category']} ({entry['detail']})"
             )
 
     # The HelmRelease twins of the GPU DaemonSets must be healthy regardless of GPU nodes.
